@@ -48,6 +48,233 @@ export async function parseMembersExcel(file: File): Promise<ParsedMemberRow[]> 
   return parsed;
 }
 
+const PDF_HEADER_OR_NOISE_PATTERNS: RegExp[] = [
+  /^(?:p[aá]gina|page|p[aá]g\.?)\s*\d+/i,
+  /\bp[aá]gina\s+\d+\s+de\s+\d+\b/i,
+  /^(?:total(?:\s+de\s+miembros)?|subtotal|resumen)\b/i,
+  /^(?:iglesia\s+adventista|asociaci[oó]n|misi[oó]n|uni[oó]n|distrito)\b/i,
+  /^(?:comisi[oó]n\s+de\s+nombramientos|lista\s+(?:de\s+)?miembros|registro\s+de\s+feligres[ií]a|n[oó]mina\s+de\s+miembros|directorio\s+de\s+iglesia)\b/i,
+  /^(?:nombre(?:\s+completo)?|nombres?\s+y\s+apellidos?|apellidos?\s+y\s+nombres?|miembro|integrante|feligr[eé]s|estado|bautismo|tel[eé]fono|celular|observaci[oó]n|observaciones|notas?|cargo|departamento|firma|fecha|hora)\s*:?$/i,
+  /^(?:generado|impreso|emitido|actualizado)\s+(?:el|por)\b/i,
+  /^(?:pastor|secretaria|secretario)\s*:/i,
+];
+
+const PDF_STATUS_ONLY_PATTERN =
+  /^(?:activo|activa|inactivo|inactiva|bautizado|bautizada|profesi[oó]n\s+de\s+fe|traslado|miembro|regular|irregular|s[ií]|no|m|f|masculino|femenino|soltero|soltera|casado|casada|viudo|viuda|divorciado|divorciada|adulto|joven|ni[ñn]o|ni[ñn]a)$/i;
+
+function stripListPrefix(raw: string): { text: string; hadListMarker: boolean } {
+  const trimmed = raw.trim().replace(/\s+/g, ' ');
+  const stripped = trimmed.replace(
+    /^(?:#?\d{1,4}\s*[.):\-–]\s*|[•·▪▫◦‣⁃\-*]+\s+|#?\d{1,4}\s+(?=[\p{L}]))/u,
+    ''
+  );
+  return {
+    text: stripped.trim(),
+    hadListMarker: stripped.trim().length !== trimmed.length,
+  };
+}
+
+function isLikelyPersonName(raw: string): boolean {
+  const clean = raw.trim().replace(/\s+/g, ' ');
+  if (clean.length < 3 || clean.length > 100) return false;
+  if (!/\p{L}/u.test(clean)) return false;
+  if (/\d/.test(clean)) return false;
+  if (clean.includes('@') || clean.includes(':') || /https?:\/\/|www\./i.test(clean)) return false;
+  if (/^[+\d\s().\-/]+$/.test(clean)) return false;
+  if (PDF_STATUS_ONLY_PATTERN.test(clean)) return false;
+  if (PDF_HEADER_OR_NOISE_PATTERNS.some((re) => re.test(clean))) return false;
+
+  const words = clean.split(' ').filter(Boolean);
+  if (words.length > 7) return false;
+
+  // Reject single short abbreviations/codes like "N°", "S/N", "ASD"
+  if (words.length === 1 && clean.length < 4) return false;
+  return true;
+}
+
+export async function parseMembersPdf(file: File): Promise<ParsedMemberRow[]> {
+  const pdfjsLib = await import('pdfjs-dist');
+  const workerModule = await import('pdfjs-dist/build/pdf.worker.min.mjs?url');
+  pdfjsLib.GlobalWorkerOptions.workerSrc = workerModule.default;
+
+  const buffer = await file.arrayBuffer();
+  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buffer) });
+  const pdf = await loadingTask.promise;
+
+  interface PositionedText {
+    str: string;
+    x: number;
+    y: number;
+    endX: number;
+  }
+
+  let totalTextItems = 0;
+  const allRows: string[][] = [];
+
+  for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+    const page = await pdf.getPage(pageNum);
+    const textContent = await page.getTextContent();
+
+    const items: PositionedText[] = [];
+    for (const rawItem of textContent.items) {
+      if (!('str' in rawItem) || typeof rawItem.str !== 'string') continue;
+      const str = rawItem.str;
+      if (!str.trim()) continue;
+      const transform = Array.isArray(rawItem.transform) ? rawItem.transform : [1, 0, 0, 1, 0, 0];
+      const x = Number(transform[4] ?? 0);
+      const y = Number(transform[5] ?? 0);
+      const width = typeof rawItem.width === 'number' ? rawItem.width : str.length * 4;
+      items.push({ str, x, y, endX: x + width });
+      totalTextItems += 1;
+    }
+
+    items.sort((a, b) => {
+      if (Math.abs(b.y - a.y) > 3.5) return b.y - a.y;
+      return a.x - b.x;
+    });
+
+    const lineBuckets: PositionedText[][] = [];
+    for (const item of items) {
+      const lastBucket = lineBuckets[lineBuckets.length - 1];
+      if (!lastBucket || Math.abs(lastBucket[0].y - item.y) > 3.5) {
+        lineBuckets.push([item]);
+      } else {
+        lastBucket.push(item);
+      }
+    }
+
+    for (const bucket of lineBuckets) {
+      bucket.sort((a, b) => a.x - b.x);
+      const cells: string[] = [];
+      let currentCell = '';
+      let prevEndX: number | null = null;
+
+      for (const item of bucket) {
+        const textPart = item.str.replace(/\s+/g, ' ');
+        if (prevEndX === null) {
+          currentCell = textPart;
+        } else {
+          const gap = item.x - prevEndX;
+          if (gap > 16) {
+            if (currentCell.trim()) cells.push(currentCell.trim());
+            currentCell = textPart;
+          } else if (gap > 1.5 && !currentCell.endsWith(' ') && !textPart.startsWith(' ')) {
+            currentCell += ` ${textPart}`;
+          } else {
+            currentCell += textPart;
+          }
+        }
+        prevEndX = Math.max(prevEndX ?? item.endX, item.endX);
+      }
+      if (currentCell.trim()) cells.push(currentCell.trim());
+      if (cells.length > 0) allRows.push(cells);
+    }
+  }
+
+  if (totalTextItems === 0) {
+    throw new Error('NO_TEXT_PDF');
+  }
+
+  // Try detecting explicit table header columns (e.g., Nombre, Apellidos, Notas/Estado)
+  let nameColIndex = -1;
+  let lastNameColIndex = -1;
+  let firstNameColIndex = -1;
+  let notesColIndex = -1;
+
+  for (const row of allRows.slice(0, 25)) {
+    if (row.length < 2) continue;
+    const lowerCells = row.map((c) => c.toLowerCase());
+    const hasHeaderHint = lowerCells.some((c) =>
+      /^(?:#|n°|no\.?|nombre|nombres|apellidos|miembro|integrante|estado|tel[eé]fono|observ|notas?)/i.test(
+        c
+      )
+    );
+    if (!hasHeaderHint) continue;
+
+    lowerCells.forEach((cell, idx) => {
+      if (/^apellidos?$/i.test(cell) && lastNameColIndex === -1) {
+        lastNameColIndex = idx;
+      } else if (/^nombres?$/i.test(cell) && firstNameColIndex === -1) {
+        firstNameColIndex = idx;
+      } else if (
+        /(nombre|miembro|hermano|persona|candidato|integrante|feligr[eé]s)/i.test(cell) &&
+        nameColIndex === -1
+      ) {
+        nameColIndex = idx;
+      } else if (
+        /(nota|observ|cargo|ministerio|detalle|grupo)/i.test(cell) &&
+        notesColIndex === -1
+      ) {
+        notesColIndex = idx;
+      }
+    });
+
+    if (nameColIndex !== -1 || (firstNameColIndex !== -1 && lastNameColIndex !== -1)) {
+      break;
+    }
+  }
+
+  const seen = new Set<string>();
+  const parsed: ParsedMemberRow[] = [];
+
+  const pushCandidate = (rawName: string, rawNotes?: string) => {
+    const cleanName = rawName.trim().replace(/\s+/g, ' ');
+    if (!isLikelyPersonName(cleanName)) return;
+    const normalized = cleanName.toLowerCase();
+    if (seen.has(normalized)) return;
+    seen.add(normalized);
+    const cleanNotes = rawNotes ? rawNotes.trim().replace(/\s+/g, ' ').slice(0, 240) : '';
+    parsed.push({
+      name: cleanName.slice(0, 140),
+      notes: cleanNotes || undefined,
+    });
+  };
+
+  for (const row of allRows) {
+    // Skip obvious page headers/footers across joined row
+    const joinedRow = row.join(' ').trim();
+    if (PDF_HEADER_OR_NOISE_PATTERNS.some((re) => re.test(joinedRow))) {
+      continue;
+    }
+
+    if (firstNameColIndex !== -1 && lastNameColIndex !== -1 && row.length > Math.max(firstNameColIndex, lastNameColIndex)) {
+      const combined = `${row[firstNameColIndex] ?? ''} ${row[lastNameColIndex] ?? ''}`.trim();
+      const { text } = stripListPrefix(combined);
+      const note = notesColIndex !== -1 ? row[notesColIndex] : undefined;
+      pushCandidate(text, note);
+      continue;
+    }
+
+    if (nameColIndex !== -1 && row.length > nameColIndex) {
+      const { text } = stripListPrefix(row[nameColIndex] ?? '');
+      const note = notesColIndex !== -1 && notesColIndex !== nameColIndex ? row[notesColIndex] : undefined;
+      pushCandidate(text, note);
+      continue;
+    }
+
+    // No explicit table header detected: handle 1-column lists, multi-column directories, or [index, name, ...]
+    const strippedCells = row.map((cell) => stripListPrefix(cell));
+    const multiColumnNumberedList =
+      strippedCells.length >= 2 &&
+      strippedCells.filter((c) => c.hadListMarker && isLikelyPersonName(c.text)).length >= 2;
+
+    if (multiColumnNumberedList) {
+      for (const cell of strippedCells) {
+        pushCandidate(cell.text);
+      }
+      continue;
+    }
+
+    // Single name per row (choosing the first plausible person name cell)
+    const nameCell = strippedCells.find((c) => isLikelyPersonName(c.text));
+    if (nameCell) {
+      pushCandidate(nameCell.text);
+    }
+  }
+
+  return parsed;
+}
+
 export interface ReportRoleRow {
   id: string;
   roleTitle: string;

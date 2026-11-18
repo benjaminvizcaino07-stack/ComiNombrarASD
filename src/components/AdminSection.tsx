@@ -7,6 +7,7 @@ import {
   Eye,
   EyeOff,
   FileSpreadsheet,
+  FileText,
   Link2,
   Lock,
   Pause,
@@ -59,7 +60,11 @@ import {
   RoundData,
   SessionData,
 } from '../types';
-import { parseMembersExcel } from '../utils/exportReports';
+import {
+  ParsedMemberRow,
+  parseMembersExcel,
+  parseMembersPdf,
+} from '../utils/exportReports';
 import { computePastorVoteAllowed, isCommitteeCountEven } from '../utils/tally';
 
 interface AdminSectionProps {
@@ -166,6 +171,13 @@ export const AdminSection: React.FC<AdminSectionProps> = ({
   const [memberSearch, setMemberSearch] = useState('');
   const [importFeedback, setImportFeedback] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const pdfInputRef = useRef<HTMLInputElement | null>(null);
+  const [pdfPreviewState, setPdfPreviewState] = useState<{
+    fileName: string;
+    rows: ParsedMemberRow[];
+    selectedIndices: Set<number>;
+    alreadyRegisteredCount: number;
+  } | null>(null);
 
   // Session edit form
   const [editChurchName, setEditChurchName] = useState('');
@@ -784,12 +796,36 @@ export const AdminSection: React.FC<AdminSectionProps> = ({
     }
   };
 
-  const handleExcelUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleMemberFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     setImportFeedback(null);
-    setBusyAction('excel');
+    const isPdf =
+      file.name.toLowerCase().endsWith('.pdf') || file.type === 'application/pdf';
+    setBusyAction(isPdf ? 'pdf' : 'excel');
     try {
+      if (isPdf) {
+        const parsed = await parseMembersPdf(file);
+        if (parsed.length === 0) {
+          setImportFeedback('No se encontraron nombres válidos en el archivo PDF seleccionado.');
+          return;
+        }
+        const existingNames = new Set(eligibleMembers.map((m) => m.name.toLowerCase()));
+        const newRows = parsed.filter((r) => !existingNames.has(r.name.toLowerCase()));
+        const alreadyRegisteredCount = parsed.length - newRows.length;
+        if (newRows.length === 0) {
+          setImportFeedback('Todos los nombres detectados en el PDF ya estaban registrados.');
+          return;
+        }
+        setPdfPreviewState({
+          fileName: file.name,
+          rows: newRows,
+          selectedIndices: new Set(newRows.map((_, idx) => idx)),
+          alreadyRegisteredCount,
+        });
+        return;
+      }
+
       const parsed = await parseMembersExcel(file);
       if (parsed.length === 0) {
         setImportFeedback('No se encontraron nombres válidos en el archivo seleccionado.');
@@ -803,11 +839,44 @@ export const AdminSection: React.FC<AdminSectionProps> = ({
       }
       const added = await batchAddEligibleMembers(session.id, newRows);
       setImportFeedback(`Se importaron ${added} miembros desde Excel correctamente.`);
-    } catch {
-      setImportFeedback('Error al leer el archivo. Verifica que sea .xlsx, .xls o .csv.');
+    } catch (err) {
+      if (isPdf) {
+        if (err instanceof Error && err.message === 'NO_TEXT_PDF') {
+          setImportFeedback(
+            'El PDF no contiene texto seleccionable (parece ser una imagen escaneada). Usa un PDF con texto o un archivo Excel/CSV.'
+          );
+        } else {
+          setImportFeedback(
+            'Error al leer el archivo PDF. Verifica que no esté dañado ni protegido con contraseña.'
+          );
+        }
+      } else {
+        setImportFeedback('Error al leer el archivo. Verifica que sea .xlsx, .xls o .csv.');
+      }
     } finally {
       setBusyAction(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
+      if (pdfInputRef.current) pdfInputRef.current.value = '';
+    }
+  };
+
+  const handleConfirmPdfImport = async () => {
+    if (!pdfPreviewState) return;
+    const chosen = pdfPreviewState.rows.filter((_, idx) =>
+      pdfPreviewState.selectedIndices.has(idx)
+    );
+    if (chosen.length === 0) return;
+
+    setActionError(null);
+    setBusyAction('pdf-confirm');
+    try {
+      const added = await batchAddEligibleMembers(session.id, chosen);
+      setPdfPreviewState(null);
+      setImportFeedback(`Se importaron ${added} miembros desde PDF correctamente.`);
+    } catch (err) {
+      setActionError(extractUserErrorMessage(err));
+    } finally {
+      setBusyAction(null);
     }
   };
 
@@ -1809,26 +1878,42 @@ export const AdminSection: React.FC<AdminSectionProps> = ({
                   Lista de Miembros Aptos para Ser Elegidos
                 </h3>
                 <p className="text-sm text-slate-600">
-                  Importa la feligresía desde Excel (.xlsx, .xls, .csv) o agrega nombres
-                  manualmente.
+                  Importa la feligresía desde Excel (.xlsx, .xls, .csv), PDF (.pdf) o agrega
+                  nombres manualmente.
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept=".xlsx,.xls,.csv"
-                  onChange={handleExcelUpload}
+                  accept=".xlsx,.xls,.csv,.pdf"
+                  onChange={handleMemberFileUpload}
+                  className="hidden"
+                />
+                <input
+                  ref={pdfInputRef}
+                  type="file"
+                  accept=".pdf,application/pdf"
+                  onChange={handleMemberFileUpload}
                   className="hidden"
                 />
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  disabled={busyAction === 'excel'}
-                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-700 text-white text-sm font-semibold hover:bg-emerald-800 transition-colors cursor-pointer min-h-[44px]"
+                  disabled={busyAction === 'excel' || busyAction === 'pdf'}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-700 text-white text-sm font-semibold hover:bg-emerald-800 transition-colors cursor-pointer min-h-[44px] disabled:opacity-60"
                 >
                   <FileSpreadsheet className="w-4 h-4" />
                   {busyAction === 'excel' ? 'Importando...' : 'Cargar Excel / CSV'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => pdfInputRef.current?.click()}
+                  disabled={busyAction === 'excel' || busyAction === 'pdf'}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-800 text-white text-sm font-semibold hover:bg-blue-900 transition-colors cursor-pointer min-h-[44px] disabled:opacity-60"
+                >
+                  <FileText className="w-4 h-4" />
+                  {busyAction === 'pdf' ? 'Leyendo PDF...' : 'Cargar PDF'}
                 </button>
                 <button
                   type="button"
@@ -2331,6 +2416,131 @@ export const AdminSection: React.FC<AdminSectionProps> = ({
                 className="px-5 py-2.5 rounded-xl bg-blue-800 text-white text-sm font-semibold hover:bg-blue-900 cursor-pointer"
               >
                 Importar nombres
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: VISTA PREVIA DE NOMBRES DETECTADOS EN PDF */}
+      {pdfPreviewState && (
+        <div className="fixed inset-0 z-50 bg-slate-950/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-200 rounded-2xl max-w-2xl w-full max-h-[85vh] flex flex-col overflow-hidden">
+            <div className="p-5 border-b border-slate-200 flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <h3 className="text-lg font-bold text-slate-900">
+                  Nombres detectados en el PDF
+                </h3>
+                <p className="text-xs text-slate-600 truncate">
+                  Archivo: {pdfPreviewState.fileName} · Revisa la lista y desmarca cualquier línea
+                  que no corresponda a un miembro.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPdfPreviewState(null)}
+                className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 cursor-pointer shrink-0"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="px-5 py-3 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2 text-xs font-semibold">
+              <span className="text-slate-700 tabular-nums">
+                {pdfPreviewState.selectedIndices.size} de {pdfPreviewState.rows.length} seleccionados
+                {pdfPreviewState.alreadyRegisteredCount > 0 && (
+                  <span className="text-slate-500 font-medium">
+                    {' '}
+                    · {pdfPreviewState.alreadyRegisteredCount} ya registrados omitidos
+                  </span>
+                )}
+              </span>
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setPdfPreviewState((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            selectedIndices: new Set(prev.rows.map((_, idx) => idx)),
+                          }
+                        : null
+                    )
+                  }
+                  className="text-blue-800 hover:underline cursor-pointer"
+                >
+                  Seleccionar todos
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setPdfPreviewState((prev) =>
+                      prev ? { ...prev, selectedIndices: new Set() } : null
+                    )
+                  }
+                  className="text-slate-600 hover:underline cursor-pointer"
+                >
+                  Limpiar selección
+                </button>
+              </div>
+            </div>
+
+            <div className="p-4 overflow-y-auto divide-y divide-slate-100">
+              {pdfPreviewState.rows.map((row, idx) => {
+                const checked = pdfPreviewState.selectedIndices.has(idx);
+                return (
+                  <label
+                    key={`${row.name}-${idx}`}
+                    className="py-2.5 px-2 flex items-center gap-3 cursor-pointer hover:bg-slate-50 rounded-lg min-h-[44px]"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() =>
+                        setPdfPreviewState((prev) => {
+                          if (!prev) return null;
+                          const next = new Set(prev.selectedIndices);
+                          if (next.has(idx)) {
+                            next.delete(idx);
+                          } else {
+                            next.add(idx);
+                          }
+                          return { ...prev, selectedIndices: next };
+                        })
+                      }
+                      className="w-4 h-4 accent-blue-800 shrink-0"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-slate-900 truncate">{row.name}</p>
+                      {row.notes && (
+                        <p className="text-xs text-slate-500 truncate">{row.notes}</p>
+                      )}
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
+
+            <div className="p-4 border-t border-slate-200 flex items-center justify-end gap-3 bg-slate-50">
+              <button
+                type="button"
+                onClick={() => setPdfPreviewState(null)}
+                className="px-4 py-2.5 rounded-xl border border-slate-300 bg-white text-slate-700 text-sm font-semibold cursor-pointer min-h-[44px]"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={
+                  busyAction === 'pdf-confirm' || pdfPreviewState.selectedIndices.size === 0
+                }
+                onClick={handleConfirmPdfImport}
+                className="px-5 py-2.5 rounded-xl bg-blue-800 text-white text-sm font-semibold hover:bg-blue-900 cursor-pointer disabled:opacity-50 min-h-[44px]"
+              >
+                {busyAction === 'pdf-confirm'
+                  ? 'Importando...'
+                  : `Importar ${pdfPreviewState.selectedIndices.size} miembros`}
               </button>
             </div>
           </div>
