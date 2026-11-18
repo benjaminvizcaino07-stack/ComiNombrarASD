@@ -91,6 +91,10 @@ export async function updateSessionSettings(
   updates: Partial<{
     churchName: string;
     year: string;
+    pastorName: string;
+    secretaryName: string;
+    meetingDate: string;
+    meetingTime: string;
     showResultsOnProjector: boolean;
     pastorVoteEnabledOverride: PastorVoteOverride;
     activeRoundId: string | null;
@@ -102,6 +106,11 @@ export async function updateSessionSettings(
     const clean: Record<string, unknown> = { updatedAt: serverTimestamp() };
     if (updates.churchName !== undefined) clean.churchName = clampString(updates.churchName, 140);
     if (updates.year !== undefined) clean.year = clampString(updates.year, 20);
+    if (updates.pastorName !== undefined) clean.pastorName = clampString(updates.pastorName, 140);
+    if (updates.secretaryName !== undefined)
+      clean.secretaryName = clampString(updates.secretaryName, 140);
+    if (updates.meetingDate !== undefined) clean.meetingDate = clampString(updates.meetingDate, 40);
+    if (updates.meetingTime !== undefined) clean.meetingTime = clampString(updates.meetingTime, 40);
     if (updates.showResultsOnProjector !== undefined)
       clean.showResultsOnProjector = updates.showResultsOnProjector;
     if (updates.pastorVoteEnabledOverride !== undefined)

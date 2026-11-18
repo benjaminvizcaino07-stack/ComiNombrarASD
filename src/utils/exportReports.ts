@@ -128,45 +128,120 @@ export function groupDepartmentsForReport(
   }));
 }
 
-export function exportFinalListExcel(
-  churchName: string,
-  year: string,
-  departments: DepartmentPosition[]
-): void {
-  const groups = groupDepartmentsForReport(departments);
-  const rows: Record<string, string | number>[] = [];
+export interface ReportMetadata {
+  churchName: string;
+  year: string;
+  pastorName?: string;
+  secretaryName?: string;
+  meetingDate?: string;
+  meetingTime?: string;
+}
 
-  for (const group of groups) {
-    for (const row of group.rows) {
-      rows.push({
-        Departamento: group.department,
-        Cargo: row.roleTitle,
-        'Personas Elegidas':
-          row.electedNames.length > 0 ? row.electedNames.join(', ') : 'Pendiente',
-        'Integrantes Asignados': row.electedNames.length,
-        'Puestos Requeridos': row.seats,
-        Estado:
-          row.status === 'completed'
-            ? 'Completado'
-            : row.status === 'tie'
-              ? 'Empate pendiente'
-              : row.status === 'voting'
-                ? 'En votación'
-                : 'Pendiente',
+export function formatMeetingDate(dateStr?: string): string {
+  const clean = (dateStr ?? '').trim();
+  if (!clean) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(clean)) {
+    const parsed = new Date(`${clean}T12:00:00`);
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed.toLocaleDateString('es-ES', {
+        day: '2-digit',
+        month: 'long',
+        year: 'numeric',
       });
     }
   }
+  return clean;
+}
 
-  const summaryRows = groups.map((g) => ({
-    Departamento: g.department,
-    'Cargos en el Departamento': g.rows.length,
-    'Total Integrantes Asignados': g.totalAssigned,
-    'Total Puestos Configurados': g.totalSeats,
-  }));
+export function formatMeetingTime(timeStr?: string): string {
+  const clean = (timeStr ?? '').trim();
+  if (!clean) return '';
+  if (/^\d{2}:\d{2}$/.test(clean)) {
+    const parsed = new Date(`2000-01-01T${clean}:00`);
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed.toLocaleTimeString('es-ES', {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true,
+      });
+    }
+  }
+  return clean;
+}
+
+export function exportFinalListExcel(
+  meta: ReportMetadata,
+  departments: DepartmentPosition[]
+): void {
+  const groups = groupDepartmentsForReport(departments);
+  const formattedDate = formatMeetingDate(meta.meetingDate) || new Date().toLocaleDateString('es-ES');
+  const formattedTime = formatMeetingTime(meta.meetingTime) || 'No especificada';
+  const pastorDisplay = meta.pastorName?.trim() || 'No especificado';
+  const secretaryDisplay = meta.secretaryName?.trim() || 'No especificado';
+
+  const listHeader: (string | number)[][] = [
+    ['NOMBRAMIENTOS SDA - HOJA FINAL DE RESULTADOS'],
+    ['Iglesia:', meta.churchName, 'Período:', meta.year],
+    ['Pastor:', pastorDisplay, 'Secretaria(o):', secretaryDisplay],
+    ['Fecha de reunión:', formattedDate, 'Hora:', formattedTime],
+    [],
+    [
+      'Departamento',
+      'Cargo',
+      'Personas Elegidas',
+      'Integrantes Asignados',
+      'Puestos Requeridos',
+      'Estado',
+    ],
+  ];
+
+  const listDataRows: (string | number)[][] = [];
+  for (const group of groups) {
+    for (const row of group.rows) {
+      listDataRows.push([
+        group.department,
+        row.roleTitle,
+        row.electedNames.length > 0 ? row.electedNames.join(', ') : 'Pendiente',
+        row.electedNames.length,
+        row.seats,
+        row.status === 'completed'
+          ? 'Completado'
+          : row.status === 'tie'
+            ? 'Empate pendiente'
+            : row.status === 'voting'
+              ? 'En votación'
+              : 'Pendiente',
+      ]);
+    }
+  }
+
+  const summaryHeader: (string | number)[][] = [
+    ['NOMBRAMIENTOS SDA - RESUMEN POR DEPARTAMENTO'],
+    ['Iglesia:', meta.churchName, 'Período:', meta.year],
+    ['Pastor:', pastorDisplay, 'Secretaria(o):', secretaryDisplay],
+    ['Fecha de reunión:', formattedDate, 'Hora:', formattedTime],
+    [],
+    [
+      'Departamento',
+      'Cargos en el Departamento',
+      'Total Integrantes Asignados',
+      'Total Puestos Configurados',
+    ],
+  ];
+
+  const summaryDataRows: (string | number)[][] = groups.map((g) => [
+    g.department,
+    g.rows.length,
+    g.totalAssigned,
+    g.totalSeats,
+  ]);
 
   const wb = XLSX.utils.book_new();
-  const wsList = XLSX.utils.json_to_sheet(rows);
-  const wsSummary = XLSX.utils.json_to_sheet(summaryRows);
+  const wsList = XLSX.utils.aoa_to_sheet([...listHeader, ...listDataRows]);
+  const wsSummary = XLSX.utils.aoa_to_sheet([...summaryHeader, ...summaryDataRows]);
+
+  wsList['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 5 } }];
+  wsSummary['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 3 } }];
 
   wsList['!cols'] = [
     { wch: 30 },
@@ -181,8 +256,8 @@ export function exportFinalListExcel(
   XLSX.utils.book_append_sheet(wb, wsList, 'Lista de Nombramientos');
   XLSX.utils.book_append_sheet(wb, wsSummary, 'Resumen por Departamento');
 
-  const safeChurch = churchName.replace(/[^a-zA-Z0-9_-]+/g, '_');
-  XLSX.writeFile(wb, `Nombramientos_SDA_${safeChurch}_${year}.xlsx`);
+  const safeChurch = meta.churchName.replace(/[^a-zA-Z0-9_-]+/g, '_');
+  XLSX.writeFile(wb, `Nombramientos_SDA_${safeChurch}_${meta.year}.xlsx`);
 }
 
 const APP_LOGO_PATH = '/assets/aistudio/Icono_azul_de_nombramientos_SDA_0e21f0e4.png';
@@ -215,13 +290,17 @@ async function loadLogoAsPngDataUrl(url: string): Promise<string | null> {
 }
 
 export async function exportFinalListPDF(
-  churchName: string,
-  year: string,
+  meta: ReportMetadata,
   departments: DepartmentPosition[]
 ): Promise<void> {
   const groups = groupDepartmentsForReport(departments);
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'letter' });
   const logoDataUrl = await loadLogoAsPngDataUrl(APP_LOGO_PATH);
+
+  const formattedDate = formatMeetingDate(meta.meetingDate) || new Date().toLocaleDateString('es-ES');
+  const formattedTime = formatMeetingTime(meta.meetingTime) || 'No especificada';
+  const pastorDisplay = meta.pastorName?.trim() || 'No especificado';
+  const secretaryDisplay = meta.secretaryName?.trim() || 'No especificado';
 
   const textStartX = logoDataUrl ? 35 : 14;
   if (logoDataUrl) {
@@ -229,25 +308,38 @@ export async function exportFinalListPDF(
   }
 
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(15);
+  doc.setFontSize(14.5);
   doc.setTextColor(15, 23, 42);
   doc.text('INFORME DE COMISIÓN DE NOMBRAMIENTOS', textStartX, 17);
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(10.5);
   doc.setTextColor(51, 65, 85);
-  doc.text(`NOMBRAMIENTOS SDA · ${churchName} · Período ${year}`, textStartX, 23);
+  doc.text(`NOMBRAMIENTOS SDA · ${meta.churchName} · Período ${meta.year}`, textStartX, 23);
 
   doc.setFontSize(9);
   doc.setTextColor(71, 85, 105);
-  doc.text(
-    `Iglesia Adventista del Séptimo Día · Generado el ${new Date().toLocaleDateString('es-ES')}`,
-    textStartX,
-    28.5
-  );
+  doc.text('Iglesia Adventista del Séptimo Día · Hoja Oficial de Resultados', textStartX, 28.5);
 
+  // Structured Acta / Meeting Metadata Box
+  doc.setFillColor(248, 250, 252);
   doc.setDrawColor(226, 232, 240);
-  doc.line(14, 33, 196, 33);
+  doc.roundedRect(14, 34, 186, 18, 2, 2, 'FD');
+
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(30, 41, 59);
+  doc.text('Pastor:', 18, 41);
+  doc.text('Secretaria(o):', 18, 48);
+  doc.text('Fecha de reunión:', 112, 41);
+  doc.text('Hora:', 112, 48);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(15, 23, 42);
+  doc.text(pastorDisplay.slice(0, 40), 33, 41);
+  doc.text(secretaryDisplay.slice(0, 36), 42, 48);
+  doc.text(formattedDate, 143, 41);
+  doc.text(formattedTime, 123, 48);
 
   const tableBody: (string | number)[][] = [];
   for (const group of groups) {
@@ -262,7 +354,7 @@ export async function exportFinalListPDF(
   }
 
   autoTable(doc, {
-    startY: 37,
+    startY: 56,
     head: [['Departamento', 'Cargo', 'Personas Elegidas', 'Asignados']],
     body: tableBody,
     theme: 'grid',
@@ -286,17 +378,37 @@ export async function exportFinalListPDF(
     },
   });
 
+  const pageHeight = doc.internal.pageSize.getHeight();
   const finalY = (doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? 220;
-  const sigY = Math.min(finalY + 20, 255);
+  let sigY = finalY + 24;
+  if (sigY + 14 > pageHeight - 10) {
+    doc.addPage();
+    sigY = 38;
+  }
 
   doc.setDrawColor(148, 163, 184);
   doc.line(20, sigY, 90, sigY);
   doc.line(120, sigY, 190, sigY);
+
+  if (meta.pastorName?.trim()) {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9.5);
+    doc.setTextColor(15, 23, 42);
+    doc.text(meta.pastorName.trim().slice(0, 42), 55, sigY - 2, { align: 'center' });
+  }
+  if (meta.secretaryName?.trim()) {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9.5);
+    doc.setTextColor(15, 23, 42);
+    doc.text(meta.secretaryName.trim().slice(0, 42), 155, sigY - 2, { align: 'center' });
+  }
+
+  doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
   doc.setTextColor(71, 85, 105);
   doc.text('Pastor / Presidente de Comisión', 55, sigY + 5, { align: 'center' });
-  doc.text('Secretario(a) de Comisión', 155, sigY + 5, { align: 'center' });
+  doc.text('Secretaria(o) de Comisión', 155, sigY + 5, { align: 'center' });
 
-  const safeChurch = churchName.replace(/[^a-zA-Z0-9_-]+/g, '_');
-  doc.save(`Nombramientos_SDA_${safeChurch}_${year}.pdf`);
+  const safeChurch = meta.churchName.replace(/[^a-zA-Z0-9_-]+/g, '_');
+  doc.save(`Nombramientos_SDA_${safeChurch}_${meta.year}.pdf`);
 }

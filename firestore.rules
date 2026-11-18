@@ -48,14 +48,20 @@ service cloud.firestore {
           'enabledCommitteeCount', 'createdAt', 'updatedAt'
         ])
         && data.keys().hasOnly([
-          'ownerId', 'ownerEmail', 'churchName', 'year', 'projectorKey',
-          'activeRoundId', 'showResultsOnProjector', 'pastorVoteEnabledOverride',
-          'enabledCommitteeCount', 'createdAt', 'updatedAt'
+          'ownerId', 'ownerEmail', 'churchName', 'year',
+          'pastorName', 'secretaryName', 'meetingDate', 'meetingTime',
+          'projectorKey', 'activeRoundId', 'showResultsOnProjector',
+          'pastorVoteEnabledOverride', 'enabledCommitteeCount',
+          'createdAt', 'updatedAt'
         ])
         && isValidId(data.ownerId)
         && data.ownerEmail is string && data.ownerEmail.size() >= 3 && data.ownerEmail.size() <= 200
         && data.churchName is string && data.churchName.size() >= 1 && data.churchName.size() <= 140
         && data.year is string && data.year.size() >= 1 && data.year.size() <= 20
+        && (!('pastorName' in data) || data.pastorName == null || (data.pastorName is string && data.pastorName.size() <= 140))
+        && (!('secretaryName' in data) || data.secretaryName == null || (data.secretaryName is string && data.secretaryName.size() <= 140))
+        && (!('meetingDate' in data) || data.meetingDate == null || (data.meetingDate is string && data.meetingDate.size() <= 40))
+        && (!('meetingTime' in data) || data.meetingTime == null || (data.meetingTime is string && data.meetingTime.size() <= 40))
         && isValidId(data.projectorKey) && data.projectorKey.size() >= 12 && data.projectorKey.size() <= 64
         && (!('activeRoundId' in data) || data.activeRoundId == null || isValidId(data.activeRoundId))
         && data.showResultsOnProjector is bool

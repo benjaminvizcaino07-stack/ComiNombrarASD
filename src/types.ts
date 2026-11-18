@@ -16,6 +16,10 @@ export interface SessionData {
   ownerEmail: string;
   churchName: string;
   year: string;
+  pastorName?: string;
+  secretaryName?: string;
+  meetingDate?: string;
+  meetingTime?: string;
   projectorKey: string;
   activeRoundId: string | null;
   showResultsOnProjector: boolean;

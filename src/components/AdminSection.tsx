@@ -25,6 +25,7 @@ import {
   X,
 } from 'lucide-react';
 import {
+  getManualTemplateCoverageReason,
   SDA_CHURCH_MANUAL_TEMPLATES,
   SDA_GROUPED_DEPARTMENT_TEMPLATES,
   SdaManualRoleTemplate,
@@ -169,6 +170,8 @@ export const AdminSection: React.FC<AdminSectionProps> = ({
   // Session edit form
   const [editChurchName, setEditChurchName] = useState('');
   const [editYear, setEditYear] = useState('');
+  const [editPastorName, setEditPastorName] = useState('');
+  const [editSecretaryName, setEditSecretaryName] = useState('');
   const [savingSessionEdit, setSavingSessionEdit] = useState(false);
 
   const [busyAction, setBusyAction] = useState<string | null>(null);
@@ -198,6 +201,17 @@ export const AdminSection: React.FC<AdminSectionProps> = ({
     () => [...departments].sort((a, b) => a.order - b.order),
     [departments]
   );
+
+  const coveredReasonById = useMemo(() => {
+    const map = new Map<string, string>();
+    [...SDA_CHURCH_MANUAL_TEMPLATES, ...SDA_GROUPED_DEPARTMENT_TEMPLATES].forEach((tpl) => {
+      const reason = getManualTemplateCoverageReason(tpl, departments);
+      if (reason) {
+        map.set(tpl.id, reason);
+      }
+    });
+    return map;
+  }, [departments]);
 
   const flashNotice = (msg: string) => {
     setStatusNotice(msg);
@@ -640,21 +654,44 @@ export const AdminSection: React.FC<AdminSectionProps> = ({
     }
   };
 
+  const openManualModal = () => {
+    setSelectedTemplateIds(
+      SDA_CHURCH_MANUAL_TEMPLATES.filter((t) => !coveredReasonById.has(t.id)).map((t) => t.id)
+    );
+    setSelectedGroupedIds(
+      SDA_GROUPED_DEPARTMENT_TEMPLATES.filter((t) => !coveredReasonById.has(t.id)).map((t) => t.id)
+    );
+    setShowManualModal(true);
+  };
+
   const handleImportManualTemplates = async () => {
     const source =
       templateTab === 'grouped' ? SDA_GROUPED_DEPARTMENT_TEMPLATES : SDA_CHURCH_MANUAL_TEMPLATES;
     const activeIds = templateTab === 'grouped' ? selectedGroupedIds : selectedTemplateIds;
-    const chosen: SdaManualRoleTemplate[] = source.filter((t) => activeIds.includes(t.id));
-    if (chosen.length === 0) return;
+    const selectedTemplates = source.filter((t) => activeIds.includes(t.id));
+    const chosen: SdaManualRoleTemplate[] = selectedTemplates.filter(
+      (t) => !coveredReasonById.has(t.id)
+    );
+    if (chosen.length === 0) {
+      flashNotice(
+        'Todos los cargos seleccionados ya están agregados o incluidos en departamentos agrupados.'
+      );
+      return;
+    }
+    const omittedCount = selectedTemplates.length - chosen.length;
     setActionError(null);
     setImportingTemplates(true);
     try {
       await batchAddManualTemplates(session.id, chosen, departments.length);
       setShowManualModal(false);
-      flashNotice(
+      const baseMsg =
         templateTab === 'grouped'
           ? `Se cargaron ${chosen.length} departamentos agrupados del Manual de Iglesia.`
-          : `Se cargaron ${chosen.length} cargos del Manual de Iglesia.`
+          : `Se cargaron ${chosen.length} cargos del Manual de Iglesia.`;
+      flashNotice(
+        omittedCount > 0
+          ? `${baseMsg} (${omittedCount} omitidos por estar ya cubiertos).`
+          : baseMsg
       );
     } catch (err) {
       setActionError(extractUserErrorMessage(err));
@@ -918,6 +955,8 @@ export const AdminSection: React.FC<AdminSectionProps> = ({
             onClick={() => {
               setEditChurchName(session.churchName);
               setEditYear(session.year);
+              setEditPastorName(session.pastorName ?? '');
+              setEditSecretaryName(session.secretaryName ?? '');
               setSubTab('session');
             }}
             className={`flex-1 sm:flex-none px-4 py-2.5 rounded-lg text-sm font-semibold transition-colors cursor-pointer whitespace-nowrap min-h-[44px] ${
@@ -946,7 +985,7 @@ export const AdminSection: React.FC<AdminSectionProps> = ({
               </div>
               <button
                 type="button"
-                onClick={() => setShowManualModal(true)}
+                onClick={openManualModal}
                 className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-blue-50 text-blue-900 border border-blue-200 font-semibold text-sm hover:bg-blue-100 transition-colors cursor-pointer whitespace-nowrap min-h-[44px]"
               >
                 <BookOpen className="w-4 h-4" />
@@ -1950,6 +1989,8 @@ export const AdminSection: React.FC<AdminSectionProps> = ({
                   await updateSessionSettings(session.id, {
                     churchName: editChurchName,
                     year: editYear,
+                    pastorName: editPastorName,
+                    secretaryName: editSecretaryName,
                   });
                   flashNotice('Datos actualizados.');
                 } finally {
@@ -1981,6 +2022,32 @@ export const AdminSection: React.FC<AdminSectionProps> = ({
                   maxLength={20}
                   value={editYear}
                   onChange={(e) => setEditYear(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Nombre del Pastor
+                </label>
+                <input
+                  type="text"
+                  maxLength={140}
+                  value={editPastorName}
+                  onChange={(e) => setEditPastorName(e.target.value)}
+                  placeholder="Ej. Pr. Juan Pérez"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Nombre de la Secretaria(o)
+                </label>
+                <input
+                  type="text"
+                  maxLength={140}
+                  value={editSecretaryName}
+                  onChange={(e) => setEditSecretaryName(e.target.value)}
+                  placeholder="Ej. Hna. María López"
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm"
                 />
               </div>
@@ -2096,22 +2163,32 @@ export const AdminSection: React.FC<AdminSectionProps> = ({
                 templateTab === 'grouped'
                   ? SDA_GROUPED_DEPARTMENT_TEMPLATES
                   : SDA_CHURCH_MANUAL_TEMPLATES;
-              const activeSelected =
+              const rawSelected =
                 templateTab === 'grouped' ? selectedGroupedIds : selectedTemplateIds;
+              const activeSelected = rawSelected.filter((id) => !coveredReasonById.has(id));
+              const availableTemplates = activeList.filter((t) => !coveredReasonById.has(t.id));
+              const coveredCount = activeList.length - availableTemplates.length;
               const setActiveSelected =
                 templateTab === 'grouped' ? setSelectedGroupedIds : setSelectedTemplateIds;
 
               return (
                 <>
-                  <div className="px-5 py-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between text-xs font-semibold">
-                    <span className="text-slate-700">
-                      {activeSelected.length} de {activeList.length} seleccionados
+                  <div className="px-5 py-3 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2 text-xs font-semibold">
+                    <span className="text-slate-700 tabular-nums">
+                      {activeSelected.length} de {availableTemplates.length} disponibles seleccionados
+                      {coveredCount > 0 && (
+                        <span className="text-amber-800 font-medium">
+                          {' '}
+                          · {coveredCount} omitidos (ya agregados o agrupados)
+                        </span>
+                      )}
                     </span>
                     <div className="flex gap-3">
                       <button
                         type="button"
-                        onClick={() => setActiveSelected(activeList.map((t) => t.id))}
-                        className="text-blue-800 hover:underline cursor-pointer"
+                        disabled={availableTemplates.length === 0}
+                        onClick={() => setActiveSelected(availableTemplates.map((t) => t.id))}
+                        className="text-blue-800 hover:underline cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                       >
                         Seleccionar todos
                       </button>
@@ -2127,23 +2204,32 @@ export const AdminSection: React.FC<AdminSectionProps> = ({
 
                   <div className="p-5 overflow-y-auto divide-y divide-slate-100">
                     {activeList.map((tpl) => {
-                      const checked = activeSelected.includes(tpl.id);
+                      const coveredReason = coveredReasonById.get(tpl.id);
+                      const isCovered = Boolean(coveredReason);
+                      const checked = !isCovered && activeSelected.includes(tpl.id);
                       return (
                         <label
                           key={tpl.id}
-                          className="py-3 flex items-start gap-3 cursor-pointer hover:bg-slate-50 px-2 rounded-lg"
+                          className={`py-3 flex items-start gap-3 px-2 rounded-lg ${
+                            isCovered
+                              ? 'opacity-65 cursor-not-allowed bg-slate-50/60'
+                              : 'cursor-pointer hover:bg-slate-50'
+                          }`}
                         >
                           <input
                             type="checkbox"
+                            disabled={isCovered}
                             checked={checked}
-                            onChange={() =>
-                              setActiveSelected((prev) =>
-                                prev.includes(tpl.id)
-                                  ? prev.filter((id) => id !== tpl.id)
-                                  : [...prev, tpl.id]
-                              )
-                            }
-                            className="mt-1 w-4 h-4 accent-blue-800"
+                            onChange={() => {
+                              if (isCovered) return;
+                              setActiveSelected((prev) => {
+                                const cleaned = prev.filter((id) => !coveredReasonById.has(id));
+                                return cleaned.includes(tpl.id)
+                                  ? cleaned.filter((id) => id !== tpl.id)
+                                  : [...cleaned, tpl.id];
+                              });
+                            }}
+                            className="mt-1 w-4 h-4 accent-blue-800 disabled:cursor-not-allowed"
                           />
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center justify-between gap-2">
@@ -2164,6 +2250,12 @@ export const AdminSection: React.FC<AdminSectionProps> = ({
                                 tpl.leaderRoleTitle &&
                                 tpl.membersRoleTitle &&
                                 ` · Vota: ${tpl.leaderRoleTitle} · Demás: ${tpl.membersRoleTitle}`}
+                              {coveredReason && (
+                                <span className="text-amber-800 font-semibold">
+                                  {' '}
+                                  · {coveredReason}
+                                </span>
+                              )}
                             </p>
                             <p className="text-xs text-slate-600 mt-0.5">{tpl.description}</p>
                           </div>

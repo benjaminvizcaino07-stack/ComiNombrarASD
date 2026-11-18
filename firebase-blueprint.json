@@ -26,6 +26,22 @@
           "minLength": 1,
           "maxLength": 20
         },
+        "pastorName": {
+          "type": "string",
+          "maxLength": 140
+        },
+        "secretaryName": {
+          "type": "string",
+          "maxLength": 140
+        },
+        "meetingDate": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "meetingTime": {
+          "type": "string",
+          "maxLength": 40
+        },
         "projectorKey": {
           "type": "string",
           "minLength": 12,

@@ -2,7 +2,9 @@ import React, { useMemo, useState } from 'react';
 import {
   AlertTriangle,
   Award,
+  Calendar,
   Check,
+  Clock,
   Copy,
   Download,
   Eye,
@@ -11,10 +13,12 @@ import {
   Lock,
   Monitor,
   Pause,
+  Pencil,
   Play,
   Printer,
   RotateCcw,
   Swords,
+  X,
 } from 'lucide-react';
 import {
   reopenRound,
@@ -33,7 +37,10 @@ import {
 import {
   exportFinalListExcel,
   exportFinalListPDF,
+  formatMeetingDate,
+  formatMeetingTime,
   groupDepartmentsForReport,
+  ReportMetadata,
 } from '../utils/exportReports';
 import { evaluateGroupedRoundTallies, evaluateRoundTallies } from '../utils/tally';
 
@@ -63,10 +70,33 @@ export const ResultsSection: React.FC<ResultsSectionProps> = ({
   const [copiedProjector, setCopiedProjector] = useState(false);
   const [launchingTieBreaker, setLaunchingTieBreaker] = useState(false);
 
+  const [reportModalMode, setReportModalMode] = useState<'pdf' | 'excel' | 'edit' | null>(null);
+  const [formChurchName, setFormChurchName] = useState('');
+  const [formPastorName, setFormPastorName] = useState('');
+  const [formSecretaryName, setFormSecretaryName] = useState('');
+  const [formMeetingDate, setFormMeetingDate] = useState('');
+  const [formMeetingTime, setFormMeetingTime] = useState('');
+  const [savingReportMeta, setSavingReportMeta] = useState(false);
+
   const groupedFinalList = useMemo(
     () => groupDepartmentsForReport(departments),
     [departments]
   );
+
+  const openReportModal = (mode: 'pdf' | 'excel' | 'edit') => {
+    if (!session) return;
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const todayIso = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+    const currentHm = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
+
+    setFormChurchName(session.churchName);
+    setFormPastorName(session.pastorName ?? '');
+    setFormSecretaryName(session.secretaryName ?? '');
+    setFormMeetingDate(session.meetingDate || todayIso);
+    setFormMeetingTime(session.meetingTime || currentHm);
+    setReportModalMode(mode);
+  };
 
   if (!session) {
     return (
@@ -575,7 +605,7 @@ export const ResultsSection: React.FC<ResultsSectionProps> = ({
             <div className="no-print flex flex-wrap gap-2">
               <button
                 type="button"
-                onClick={() => void exportFinalListPDF(session.churchName, session.year, departments)}
+                onClick={() => openReportModal('pdf')}
                 className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 text-white text-sm font-semibold hover:bg-slate-800 cursor-pointer min-h-[44px]"
               >
                 <Download className="w-4 h-4" />
@@ -583,7 +613,7 @@ export const ResultsSection: React.FC<ResultsSectionProps> = ({
               </button>
               <button
                 type="button"
-                onClick={() => exportFinalListExcel(session.churchName, session.year, departments)}
+                onClick={() => openReportModal('excel')}
                 className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-700 text-white text-sm font-semibold hover:bg-emerald-800 cursor-pointer min-h-[44px]"
               >
                 <FileSpreadsheet className="w-4 h-4" />
@@ -598,6 +628,47 @@ export const ResultsSection: React.FC<ResultsSectionProps> = ({
                 Imprimir
               </button>
             </div>
+          )}
+        </div>
+
+        {/* Institutional Acta Metadata Strip (Visible on Screen & Print) */}
+        <div className="px-5 sm:px-6 py-4 bg-slate-50 border-b border-slate-200 flex flex-col lg:flex-row lg:items-center justify-between gap-3 print:px-0 print:bg-white">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-2 text-xs text-slate-700 flex-1">
+            <div>
+              <span className="font-semibold text-slate-500 block">Pastor</span>
+              <span className="font-bold text-slate-900 text-sm">
+                {session.pastorName?.trim() || 'No especificado'}
+              </span>
+            </div>
+            <div>
+              <span className="font-semibold text-slate-500 block">Secretaria(o)</span>
+              <span className="font-bold text-slate-900 text-sm">
+                {session.secretaryName?.trim() || 'No especificado'}
+              </span>
+            </div>
+            <div>
+              <span className="font-semibold text-slate-500 block">Fecha de reunión</span>
+              <span className="font-bold text-slate-900 text-sm">
+                {formatMeetingDate(session.meetingDate) || 'Por definir'}
+              </span>
+            </div>
+            <div>
+              <span className="font-semibold text-slate-500 block">Hora</span>
+              <span className="font-bold text-slate-900 text-sm">
+                {formatMeetingTime(session.meetingTime) || 'Por definir'}
+              </span>
+            </div>
+          </div>
+
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={() => openReportModal('edit')}
+              className="no-print inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-300 bg-white text-slate-800 text-xs font-semibold hover:bg-slate-100 cursor-pointer min-h-[38px] self-start lg:self-center whitespace-nowrap"
+            >
+              <Pencil className="w-3.5 h-3.5" />
+              Datos del acta
+            </button>
           )}
         </div>
 
@@ -655,7 +726,210 @@ export const ResultsSection: React.FC<ResultsSectionProps> = ({
             ))}
           </div>
         )}
+
+        {/* Print Signatures Footer */}
+        <div className="hidden print:grid print:grid-cols-2 print:gap-12 print:pt-14 print:pb-4 print:px-4">
+          <div className="text-center">
+            <p className="text-sm font-bold text-slate-900 min-h-[20px]">
+              {session.pastorName?.trim() || ''}
+            </p>
+            <div className="border-t border-slate-400 pt-1.5 text-xs text-slate-600">
+              Pastor / Presidente de Comisión
+            </div>
+          </div>
+          <div className="text-center">
+            <p className="text-sm font-bold text-slate-900 min-h-[20px]">
+              {session.secretaryName?.trim() || ''}
+            </p>
+            <div className="border-t border-slate-400 pt-1.5 text-xs text-slate-600">
+              Secretaria(o) de Comisión
+            </div>
+          </div>
+        </div>
       </div>
+
+      {/* MODAL: DATOS PARA DESCARGAR / EDITAR HOJA DE RESULTADOS */}
+      {reportModalMode && (
+        <div className="no-print fixed inset-0 z-50 bg-slate-950/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-200 rounded-2xl max-w-lg w-full p-6 space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-bold text-slate-900">
+                  {reportModalMode === 'pdf'
+                    ? 'Datos de la Hoja de Resultados (PDF)'
+                    : reportModalMode === 'excel'
+                      ? 'Datos de la Hoja de Resultados (Excel)'
+                      : 'Datos del Acta y Hoja de Resultados'}
+                </h3>
+                <p className="text-xs text-slate-600 mt-0.5">
+                  Completa o verifica estos datos para integrarlos en la hoja oficial de resultados.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setReportModalMode(null)}
+                className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                setSavingReportMeta(true);
+                try {
+                  const cleanChurch = formChurchName.trim() || session.churchName;
+                  const cleanPastor = formPastorName.trim();
+                  const cleanSecretary = formSecretaryName.trim();
+                  const cleanDate = formMeetingDate.trim();
+                  const cleanTime = formMeetingTime.trim();
+
+                  await updateSessionSettings(session.id, {
+                    churchName: cleanChurch,
+                    pastorName: cleanPastor,
+                    secretaryName: cleanSecretary,
+                    meetingDate: cleanDate,
+                    meetingTime: cleanTime,
+                  });
+
+                  const meta: ReportMetadata = {
+                    churchName: cleanChurch,
+                    year: session.year,
+                    pastorName: cleanPastor,
+                    secretaryName: cleanSecretary,
+                    meetingDate: cleanDate,
+                    meetingTime: cleanTime,
+                  };
+
+                  if (reportModalMode === 'pdf') {
+                    await exportFinalListPDF(meta, departments);
+                  } else if (reportModalMode === 'excel') {
+                    exportFinalListExcel(meta, departments);
+                  }
+                  setReportModalMode(null);
+                } finally {
+                  setSavingReportMeta(false);
+                }
+              }}
+              className="space-y-3.5"
+            >
+              <div>
+                <label
+                  htmlFor="report-church"
+                  className="block text-xs font-semibold text-slate-700 mb-1"
+                >
+                  Nombre de la Iglesia
+                </label>
+                <input
+                  id="report-church"
+                  type="text"
+                  required
+                  maxLength={140}
+                  value={formChurchName}
+                  onChange={(e) => setFormChurchName(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-700 min-h-[44px]"
+                />
+              </div>
+
+              <div className="grid sm:grid-cols-2 gap-3">
+                <div>
+                  <label
+                    htmlFor="report-pastor"
+                    className="block text-xs font-semibold text-slate-700 mb-1"
+                  >
+                    Nombre del Pastor
+                  </label>
+                  <input
+                    id="report-pastor"
+                    type="text"
+                    maxLength={140}
+                    value={formPastorName}
+                    onChange={(e) => setFormPastorName(e.target.value)}
+                    placeholder="Ej. Pr. Juan Pérez"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-700 min-h-[44px]"
+                  />
+                </div>
+                <div>
+                  <label
+                    htmlFor="report-secretary"
+                    className="block text-xs font-semibold text-slate-700 mb-1"
+                  >
+                    Nombre de la Secretaria(o)
+                  </label>
+                  <input
+                    id="report-secretary"
+                    type="text"
+                    maxLength={140}
+                    value={formSecretaryName}
+                    onChange={(e) => setFormSecretaryName(e.target.value)}
+                    placeholder="Ej. Hna. María López"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-700 min-h-[44px]"
+                  />
+                </div>
+              </div>
+
+              <div className="grid sm:grid-cols-2 gap-3">
+                <div>
+                  <label
+                    htmlFor="report-date"
+                    className="flex items-center gap-1.5 text-xs font-semibold text-slate-700 mb-1"
+                  >
+                    <Calendar className="w-3.5 h-3.5 text-blue-800" />
+                    Fecha de la reunión
+                  </label>
+                  <input
+                    id="report-date"
+                    type="date"
+                    value={formMeetingDate}
+                    onChange={(e) => setFormMeetingDate(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-700 min-h-[44px]"
+                  />
+                </div>
+                <div>
+                  <label
+                    htmlFor="report-time"
+                    className="flex items-center gap-1.5 text-xs font-semibold text-slate-700 mb-1"
+                  >
+                    <Clock className="w-3.5 h-3.5 text-blue-800" />
+                    Hora de la reunión
+                  </label>
+                  <input
+                    id="report-time"
+                    type="time"
+                    value={formMeetingTime}
+                    onChange={(e) => setFormMeetingTime(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-700 min-h-[44px]"
+                  />
+                </div>
+              </div>
+
+              <div className="pt-2 flex justify-end gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setReportModalMode(null)}
+                  className="px-4 py-2.5 rounded-xl border border-slate-300 text-sm font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer min-h-[44px]"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingReportMeta}
+                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-800 text-white text-sm font-semibold hover:bg-blue-900 cursor-pointer disabled:opacity-50 min-h-[44px]"
+                >
+                  {savingReportMeta
+                    ? 'Generando...'
+                    : reportModalMode === 'pdf'
+                      ? 'Guardar y Descargar PDF'
+                      : reportModalMode === 'excel'
+                        ? 'Guardar y Descargar Excel'
+                        : 'Guardar datos'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

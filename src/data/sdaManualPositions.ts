@@ -1,3 +1,5 @@
+import { DepartmentPosition } from '../types';
+
 export interface SdaManualRoleTemplate {
   id: string;
   department: string;
@@ -327,3 +329,43 @@ export const SDA_CHURCH_MANUAL_TEMPLATES: SdaManualRoleTemplate[] = [
     description: 'Promueve literatura adventista, revistas misioneras y colportaje.',
   },
 ];
+
+const normalizeLabel = (value?: string): string =>
+  (value ?? '').trim().toLowerCase();
+
+export const getManualTemplateCoverageReason = (
+  tpl: SdaManualRoleTemplate,
+  existingDepartments: DepartmentPosition[]
+): string | null => {
+  const tplDept = normalizeLabel(tpl.department);
+  const tplRole = normalizeLabel(tpl.roleTitle);
+
+  if (tpl.votingMode === 'grouped') {
+    const hasGrouped = existingDepartments.some(
+      (d) =>
+        d.votingMode === 'grouped' &&
+        (normalizeLabel(d.department) === tplDept || normalizeLabel(d.roleTitle) === tplRole)
+    );
+    return hasGrouped ? 'Ya agregado' : null;
+  }
+
+  const coveredByGrouped = existingDepartments.some((d) => {
+    if (d.votingMode !== 'grouped') return false;
+    if (normalizeLabel(d.department) !== tplDept) return false;
+    const groupedTitles = [d.leaderRoleTitle, d.membersRoleTitle, d.roleTitle].map(normalizeLabel);
+    return groupedTitles.includes(tplRole);
+  });
+
+  if (coveredByGrouped) {
+    return 'Ya incluido en departamento agrupado';
+  }
+
+  const alreadyExists = existingDepartments.some(
+    (d) =>
+      d.votingMode !== 'grouped' &&
+      normalizeLabel(d.department) === tplDept &&
+      normalizeLabel(d.roleTitle) === tplRole
+  );
+
+  return alreadyExists ? 'Ya agregado' : null;
+};
