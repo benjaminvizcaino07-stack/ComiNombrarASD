@@ -62,6 +62,12 @@
         "enabledCommitteeCount": {
           "type": "integer"
         },
+        "allowMemberProposals": {
+          "type": "boolean"
+        },
+        "allowMemberObservations": {
+          "type": "boolean"
+        },
         "createdAt": {
           "type": "string",
           "format": "date-time"
@@ -297,6 +303,12 @@
         "votingStarted": {
           "type": "boolean"
         },
+        "memberProposalsEnabled": {
+          "type": "boolean"
+        },
+        "memberObservationsEnabled": {
+          "type": "boolean"
+        },
         "observation": {
           "type": "string",
           "maxLength": 500
@@ -523,6 +535,12 @@
           "type": "boolean"
         },
         "votingStarted": {
+          "type": "boolean"
+        },
+        "memberProposalsEnabled": {
+          "type": "boolean"
+        },
+        "memberObservationsEnabled": {
           "type": "boolean"
         },
         "observation": {

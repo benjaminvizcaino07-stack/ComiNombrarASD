@@ -25,6 +25,8 @@ export interface SessionData {
   showResultsOnProjector: boolean;
   pastorVoteEnabledOverride: PastorVoteOverride;
   enabledCommitteeCount: number;
+  allowMemberProposals?: boolean;
+  allowMemberObservations?: boolean;
   createdAt?: unknown;
   updatedAt?: unknown;
 }
@@ -86,6 +88,8 @@ export interface RoundData {
   status: RoundStatus;
   proposalsOpen?: boolean;
   votingStarted?: boolean;
+  memberProposalsEnabled?: boolean;
+  memberObservationsEnabled?: boolean;
   observation?: string | null;
   observationsRevealed?: boolean;
   pastorVoteAllowed: boolean;
@@ -164,6 +168,8 @@ export interface ProjectorState {
   roundStatus: 'idle' | 'open' | 'paused' | 'closed' | 'tie';
   proposalsOpen?: boolean;
   votingStarted?: boolean;
+  memberProposalsEnabled?: boolean;
+  memberObservationsEnabled?: boolean;
   observation?: string | null;
   observationsRevealed?: boolean;
   revealedObservations?: ProjectorObservation[];

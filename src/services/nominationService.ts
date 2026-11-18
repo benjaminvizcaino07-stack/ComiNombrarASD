@@ -57,6 +57,8 @@ export async function createSession(
       showResultsOnProjector: false,
       pastorVoteEnabledOverride: 'auto',
       enabledCommitteeCount: 0,
+      allowMemberProposals: true,
+      allowMemberObservations: true,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
@@ -71,6 +73,8 @@ export async function createSession(
       seats: 1,
       isTieBreaker: false,
       roundStatus: 'idle',
+      memberProposalsEnabled: true,
+      memberObservationsEnabled: true,
       observationsRevealed: false,
       revealedObservations: [],
       showResults: false,
@@ -533,6 +537,8 @@ export async function startRoundForDepartment(params: {
     !isTieBreaker && typeof dept.maxProposals === 'number'
       ? Math.max(1, Math.min(50, Math.floor(dept.maxProposals)))
       : null;
+  const memberProposalsEnabled = session.allowMemberProposals ?? true;
+  const memberObservationsEnabled = session.allowMemberObservations ?? true;
 
   try {
     const batch = writeBatch(db);
@@ -550,6 +556,8 @@ export async function startRoundForDepartment(params: {
       status: 'open',
       proposalsOpen: !isTieBreaker,
       votingStarted: isTieBreaker,
+      memberProposalsEnabled,
+      memberObservationsEnabled,
       observation: null,
       observationsRevealed: false,
       pastorVoteAllowed,
@@ -630,6 +638,8 @@ export async function startRoundForDepartment(params: {
       roundStatus: 'open',
       proposalsOpen: !isTieBreaker,
       votingStarted: isTieBreaker,
+      memberProposalsEnabled,
+      memberObservationsEnabled,
       observation: null,
       observationsRevealed: false,
       revealedObservations: [],
@@ -840,6 +850,46 @@ export async function updateDepartmentMaxProposals(
         maxProposals: cleanMax,
         updatedAt: serverTimestamp(),
       });
+    }
+    await batch.commit();
+  } catch (err) {
+    handleFirestoreError(err, OperationType.UPDATE, path);
+  }
+}
+
+export async function updateMemberParticipationPermissions(
+  session: SessionData,
+  updates: {
+    allowMemberProposals?: boolean;
+    allowMemberObservations?: boolean;
+  },
+  activeRound?: RoundData | null
+): Promise<void> {
+  const path = `sessions/${session.id}`;
+  try {
+    const batch = writeBatch(db);
+    const sessionUpdates: Record<string, unknown> = { updatedAt: serverTimestamp() };
+    const roundUpdates: Record<string, unknown> = { updatedAt: serverTimestamp() };
+    const projectorUpdates: Record<string, unknown> = { updatedAt: serverTimestamp() };
+
+    if (updates.allowMemberProposals !== undefined) {
+      sessionUpdates.allowMemberProposals = updates.allowMemberProposals;
+      roundUpdates.memberProposalsEnabled = updates.allowMemberProposals;
+      projectorUpdates.memberProposalsEnabled = updates.allowMemberProposals;
+    }
+    if (updates.allowMemberObservations !== undefined) {
+      sessionUpdates.allowMemberObservations = updates.allowMemberObservations;
+      roundUpdates.memberObservationsEnabled = updates.allowMemberObservations;
+      projectorUpdates.memberObservationsEnabled = updates.allowMemberObservations;
+    }
+
+    batch.update(doc(db, 'sessions', session.id), sessionUpdates);
+    if (activeRound && activeRound.status !== 'closed') {
+      batch.update(doc(db, 'sessions', session.id, 'rounds', activeRound.id), roundUpdates);
+      batch.update(
+        doc(db, 'sessions', session.id, 'projector', session.projectorKey),
+        projectorUpdates
+      );
     }
     await batch.commit();
   } catch (err) {
@@ -1152,6 +1202,10 @@ export async function syncRoundAndProjector(params: {
         roundStatus: evalResult.hasTie ? 'tie' : 'closed',
         proposalsOpen: false,
         votingStarted: round.votingStarted ?? true,
+        memberProposalsEnabled:
+          round.memberProposalsEnabled ?? session.allowMemberProposals ?? true,
+        memberObservationsEnabled:
+          round.memberObservationsEnabled ?? session.allowMemberObservations ?? true,
         observation: round.observation ?? null,
         observationsRevealed: Boolean(round.observationsRevealed),
         revealedObservations: buildProjectorObservations(
@@ -1238,6 +1292,10 @@ export async function syncRoundAndProjector(params: {
       roundStatus: projStatus,
       proposalsOpen: round.proposalsOpen ?? !round.isTieBreaker,
       votingStarted: round.votingStarted ?? true,
+      memberProposalsEnabled:
+        round.memberProposalsEnabled ?? session.allowMemberProposals ?? true,
+      memberObservationsEnabled:
+        round.memberObservationsEnabled ?? session.allowMemberObservations ?? true,
       observation: round.observation ?? null,
       observationsRevealed: Boolean(round.observationsRevealed),
       revealedObservations: buildProjectorObservations(

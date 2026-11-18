@@ -31,6 +31,7 @@ import {
   submitRoundObservation,
   syncRoundAndProjector,
   updateDepartmentMaxProposals,
+  updateMemberParticipationPermissions,
   updateRoundControl,
 } from '../services/nominationService';
 import {
@@ -129,6 +130,33 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
     () => [...departments].sort((a, b) => a.order - b.order),
     [departments]
   );
+
+  const memberProposalsEnabled = activeRound
+    ? (activeRound.memberProposalsEnabled ?? session?.allowMemberProposals ?? true)
+    : (session?.allowMemberProposals ?? true);
+  const memberObservationsEnabled = activeRound
+    ? (activeRound.memberObservationsEnabled ?? session?.allowMemberObservations ?? true)
+    : (session?.allowMemberObservations ?? true);
+
+  const handleToggleMemberPermission = async (
+    field: 'allowMemberProposals' | 'allowMemberObservations',
+    nextValue: boolean
+  ) => {
+    if (!session || !isAdmin) return;
+    setSavingControl(true);
+    setVoteError(null);
+    try {
+      await updateMemberParticipationPermissions(
+        session,
+        { [field]: nextValue },
+        activeRound
+      );
+    } catch {
+      setVoteError('No se pudo actualizar los permisos de participación de los miembros.');
+    } finally {
+      setSavingControl(false);
+    }
+  };
 
   const loadDeptLimitIntoModal = (deptId: string) => {
     const dept = orderedDepartments.find((d) => d.id === deptId);
@@ -421,16 +449,74 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
             En este momento no hay un cargo abierto para votar. Cuando el pastor inicie el
             siguiente cargo o departamento, aparecerá aquí automáticamente.
           </p>
-          {isAdmin && orderedDepartments.length > 0 && (
-            <div className="pt-2">
-              <button
-                type="button"
-                onClick={() => openProposalLimitModal()}
-                className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-slate-300 bg-white text-slate-800 text-sm font-semibold hover:bg-slate-50 cursor-pointer min-h-[44px]"
-              >
-                <SlidersHorizontal className="w-4 h-4 text-blue-800" />
-                Cantidad de propuestas por departamento
-              </button>
+          {isAdmin && (
+            <div className="pt-3 border-t border-slate-100 space-y-3">
+              {orderedDepartments.length > 0 && (
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => openProposalLimitModal()}
+                    className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-slate-300 bg-white text-slate-800 text-sm font-semibold hover:bg-slate-50 cursor-pointer min-h-[44px]"
+                  >
+                    <SlidersHorizontal className="w-4 h-4 text-blue-800" />
+                    Cantidad de propuestas por departamento
+                  </button>
+                </div>
+              )}
+              <div className="pt-2 space-y-2">
+                <p className="text-xs font-semibold text-slate-600">
+                  Permisos para miembros (Pastor / Secretario)
+                </p>
+                <div className="flex flex-wrap items-center justify-center gap-2">
+                  <button
+                    type="button"
+                    disabled={savingControl}
+                    onClick={() =>
+                      handleToggleMemberPermission('allowMemberProposals', !memberProposalsEnabled)
+                    }
+                    className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border text-xs font-semibold cursor-pointer disabled:opacity-50 min-h-[40px] ${
+                      memberProposalsEnabled
+                        ? 'border-emerald-300 bg-emerald-50 text-emerald-900 hover:bg-emerald-100'
+                        : 'border-amber-300 bg-amber-50 text-amber-950 hover:bg-amber-100'
+                    }`}
+                  >
+                    {memberProposalsEnabled ? (
+                      <>
+                        <Unlock className="w-3.5 h-3.5" /> Propuestas miembros: Permitidas
+                      </>
+                    ) : (
+                      <>
+                        <Lock className="w-3.5 h-3.5" /> Propuestas miembros: Solo Pastor/Sec.
+                      </>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={savingControl}
+                    onClick={() =>
+                      handleToggleMemberPermission(
+                        'allowMemberObservations',
+                        !memberObservationsEnabled
+                      )
+                    }
+                    className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border text-xs font-semibold cursor-pointer disabled:opacity-50 min-h-[40px] ${
+                      memberObservationsEnabled
+                        ? 'border-emerald-300 bg-emerald-50 text-emerald-900 hover:bg-emerald-100'
+                        : 'border-amber-300 bg-amber-50 text-amber-950 hover:bg-amber-100'
+                    }`}
+                  >
+                    {memberObservationsEnabled ? (
+                      <>
+                        <Unlock className="w-3.5 h-3.5" /> Observaciones miembros: Permitidas
+                      </>
+                    ) : (
+                      <>
+                        <Lock className="w-3.5 h-3.5" /> Observaciones miembros: Limitadas
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
             </div>
           )}
         </div>
@@ -507,6 +593,12 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
 
   const handlePropose = async (nameToPropose: string) => {
     if (!proposalsOpen || activeRound.status !== 'open' || activeRound.isTieBreaker) return;
+    if (!isAdmin && !memberProposalsEnabled) {
+      setVoteError(
+        'Las propuestas desde usuarios de miembros están limitadas por el pastor o secretario.'
+      );
+      return;
+    }
     if (proposalLimitReached) {
       setVoteError(
         `Se alcanzó el límite de ${maxProposals} propuestas configurado para este departamento.`
@@ -822,6 +914,68 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
             </div>
 
             {activeRound.status !== 'closed' && (
+              <div className="pt-2 border-t border-slate-100 space-y-2">
+                <p className="text-xs font-semibold text-slate-600">
+                  Permisos para miembros (Pastor / Secretario)
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {!activeRound.isTieBreaker && (
+                    <button
+                      type="button"
+                      disabled={savingControl}
+                      onClick={() =>
+                        handleToggleMemberPermission(
+                          'allowMemberProposals',
+                          !memberProposalsEnabled
+                        )
+                      }
+                      className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border text-xs font-semibold cursor-pointer disabled:opacity-50 min-h-[40px] ${
+                        memberProposalsEnabled
+                          ? 'border-emerald-300 bg-emerald-50 text-emerald-900 hover:bg-emerald-100'
+                          : 'border-amber-300 bg-amber-50 text-amber-950 hover:bg-amber-100'
+                      }`}
+                    >
+                      {memberProposalsEnabled ? (
+                        <>
+                          <Unlock className="w-3.5 h-3.5" /> Propuestas miembros: Permitidas
+                        </>
+                      ) : (
+                        <>
+                          <Lock className="w-3.5 h-3.5" /> Propuestas miembros: Solo Pastor/Sec.
+                        </>
+                      )}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    disabled={savingControl}
+                    onClick={() =>
+                      handleToggleMemberPermission(
+                        'allowMemberObservations',
+                        !memberObservationsEnabled
+                      )
+                    }
+                    className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border text-xs font-semibold cursor-pointer disabled:opacity-50 min-h-[40px] ${
+                      memberObservationsEnabled
+                        ? 'border-emerald-300 bg-emerald-50 text-emerald-900 hover:bg-emerald-100'
+                        : 'border-amber-300 bg-amber-50 text-amber-950 hover:bg-amber-100'
+                    }`}
+                  >
+                    {memberObservationsEnabled ? (
+                      <>
+                        <Unlock className="w-3.5 h-3.5" /> Observaciones miembros: Permitidas
+                      </>
+                    ) : (
+                      <>
+                        <Lock className="w-3.5 h-3.5" /> Observaciones miembros: Limitadas
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {activeRound.status !== 'closed' && (
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
@@ -923,27 +1077,41 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
                   )}
                 </h2>
                 <p className="text-xs text-slate-600 mt-0.5">
-                  {maxProposals !== null
-                    ? `Se permiten hasta ${maxProposals} ${
-                        maxProposals === 1 ? 'propuesta' : 'propuestas'
-                      } para este departamento.`
-                    : 'Elige un nombre de la lista de miembros aptos o escribe tu propuesta manualmente.'}
+                  {!isAdmin && !memberProposalsEnabled
+                    ? 'El pastor o secretario limitó temporalmente las propuestas desde cuentas de miembros.'
+                    : isAdmin && !memberProposalsEnabled
+                      ? 'Propuestas limitadas a Pastor y Secretario · Los miembros no pueden proponer desde su enlace.'
+                      : maxProposals !== null
+                        ? `Se permiten hasta ${maxProposals} ${
+                            maxProposals === 1 ? 'propuesta' : 'propuestas'
+                          } para este departamento.`
+                        : 'Elige un nombre de la lista de miembros aptos o escribe tu propuesta manualmente.'}
                 </p>
               </div>
-              {!proposalLimitReached && eligibleMembers.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => setShowSuggestions((prev) => !prev)}
-                  className="text-xs font-semibold text-blue-800 hover:underline cursor-pointer"
-                >
-                  {showSuggestions
-                    ? 'Ocultar lista'
-                    : `Ver lista de miembros (${activeEligible.length})`}
-                </button>
-              )}
+              {(isAdmin || memberProposalsEnabled) &&
+                !proposalLimitReached &&
+                eligibleMembers.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowSuggestions((prev) => !prev)}
+                    className="text-xs font-semibold text-blue-800 hover:underline cursor-pointer"
+                  >
+                    {showSuggestions
+                      ? 'Ocultar lista'
+                      : `Ver lista de miembros (${activeEligible.length})`}
+                  </button>
+                )}
             </div>
 
-            {proposalLimitReached ? (
+            {!isAdmin && !memberProposalsEnabled ? (
+              <div className="p-3.5 rounded-xl bg-slate-100 border border-slate-200 text-xs sm:text-sm text-slate-700 flex items-center gap-2.5">
+                <Lock className="w-4 h-4 text-slate-600 shrink-0" />
+                <span>
+                  Las propuestas desde los usuarios de miembros están limitadas en este momento.
+                  Solo el pastor o secretario puede registrar propuestas.
+                </span>
+              </div>
+            ) : proposalLimitReached ? (
               <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-xs sm:text-sm text-amber-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <span>
                   Se alcanzó el límite de <strong>{maxProposals}</strong>{' '}
@@ -1235,52 +1403,70 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
 
           {/* Observation Submission Box: ONLY enabled while activeRound.status === 'open' */}
           {activeRound.status === 'open' ? (
-            (canCommitteeVote || isAdmin) && (
-              <form
-                onSubmit={async (e) => {
-                  e.preventDefault();
-                  const cleanText = memberObsInput.trim();
-                  if (!cleanText) return;
-                  const authorToken = committeeMember?.id
-                    ? committeeMember.id
-                    : isAdmin && adminUid
-                      ? `pastor_${adminUid}`
-                      : null;
-                  if (!authorToken) return;
+            !isAdmin && canCommitteeVote && !memberObservationsEnabled ? (
+              <div className="p-3.5 rounded-xl bg-slate-100 border border-slate-200 text-xs text-slate-700 flex items-center gap-2.5">
+                <Lock className="w-4 h-4 text-slate-600 shrink-0" />
+                <span>
+                  El pastor o secretario ha limitado temporalmente el envío de observaciones por
+                  parte de los miembros.
+                </span>
+              </div>
+            ) : (
+              (canCommitteeVote || isAdmin) && (
+                <form
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    if (!isAdmin && !memberObservationsEnabled) return;
+                    const cleanText = memberObsInput.trim();
+                    if (!cleanText) return;
+                    const authorToken = committeeMember?.id
+                      ? committeeMember.id
+                      : isAdmin && adminUid
+                        ? `pastor_${adminUid}`
+                        : null;
+                    if (!authorToken) return;
 
-                  const authorRole: 'member' | 'pastor' = committeeMember?.id ? 'member' : 'pastor';
-                  const candidateName = memberObsCandidate.trim() || null;
+                    const authorRole: 'member' | 'pastor' = committeeMember?.id
+                      ? 'member'
+                      : 'pastor';
+                    const candidateName = memberObsCandidate.trim() || null;
 
-                  setSubmittingObs(true);
-                  setVoteError(null);
-                  try {
-                    const wasRevealed = await submitRoundObservation({
-                      sessionId: session.id,
-                      roundId: activeRound.id,
-                      authorToken,
-                      authorRole,
-                      candidateName,
-                      text: cleanText,
-                      revealed: Boolean(activeRound.observationsRevealed),
-                    });
-                    if (!wasRevealed && !isAdmin) {
-                      setLocalSentObs((prev) => [
-                        ...prev,
-                        { roundId: activeRound.id, candidateName, text: cleanText },
-                      ]);
+                    setSubmittingObs(true);
+                    setVoteError(null);
+                    try {
+                      const wasRevealed = await submitRoundObservation({
+                        sessionId: session.id,
+                        roundId: activeRound.id,
+                        authorToken,
+                        authorRole,
+                        candidateName,
+                        text: cleanText,
+                        revealed: Boolean(activeRound.observationsRevealed),
+                      });
+                      if (!wasRevealed && !isAdmin) {
+                        setLocalSentObs((prev) => [
+                          ...prev,
+                          { roundId: activeRound.id, candidateName, text: cleanText },
+                        ]);
+                      }
+                      setMemberObsInput('');
+                      setMemberObsCandidate('');
+                    } catch {
+                      setVoteError(
+                        'No se pudo enviar la observación. Verifica tu conexión o si la votación sigue abierta.'
+                      );
+                    } finally {
+                      setSubmittingObs(false);
                     }
-                    setMemberObsInput('');
-                    setMemberObsCandidate('');
-                  } catch {
-                    setVoteError(
-                      'No se pudo enviar la observación. Verifica tu conexión o si la votación sigue abierta.'
-                    );
-                  } finally {
-                    setSubmittingObs(false);
-                  }
-                }}
-                className="space-y-3"
-              >
+                  }}
+                  className="space-y-3"
+                >
+                  {isAdmin && !memberObservationsEnabled && (
+                    <p className="text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+                      Observaciones de miembros limitadas · Como pastor o secretario puedes seguir
+                      enviando observaciones o volver a habilitarlas arriba.
+                    </p>
+                  )}
                 {candidates.length > 0 ? (
                   <div>
                     <label
@@ -1344,6 +1530,7 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
                   </button>
                 </div>
               </form>
+              )
             )
           ) : (
             <div className="p-3.5 rounded-xl bg-slate-100 border border-slate-200 text-xs text-slate-700 flex items-center gap-2.5">

@@ -394,6 +394,8 @@ export default function App() {
       activeRound.status,
       activeRound.proposalsOpen ? '1' : '0',
       activeRound.votingStarted === false ? '0' : '1',
+      activeRound.memberProposalsEnabled === false ? '0' : '1',
+      activeRound.memberObservationsEnabled === false ? '0' : '1',
       activeRound.observation ?? '',
       activeRound.observationsRevealed ? '1' : '0',
       activeRound.maxProposals ?? '',

@@ -52,6 +52,7 @@ service cloud.firestore {
           'pastorName', 'secretaryName', 'meetingDate', 'meetingTime',
           'projectorKey', 'activeRoundId', 'showResultsOnProjector',
           'pastorVoteEnabledOverride', 'enabledCommitteeCount',
+          'allowMemberProposals', 'allowMemberObservations',
           'createdAt', 'updatedAt'
         ])
         && isValidId(data.ownerId)
@@ -67,6 +68,8 @@ service cloud.firestore {
         && data.showResultsOnProjector is bool
         && data.pastorVoteEnabledOverride in ['auto', 'enabled', 'disabled']
         && data.enabledCommitteeCount is int && data.enabledCommitteeCount >= 0 && data.enabledCommitteeCount <= 200
+        && (!('allowMemberProposals' in data) || data.allowMemberProposals is bool)
+        && (!('allowMemberObservations' in data) || data.allowMemberObservations is bool)
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
@@ -137,7 +140,8 @@ service cloud.firestore {
           'votingMode', 'groupedStage', 'leaderRoleTitle', 'membersRoleTitle',
           'totalGroupSeats', 'carryoverLeaderName', 'seats', 'maxProposals',
           'isTieBreaker', 'roundNumber', 'status', 'proposalsOpen',
-          'votingStarted', 'observation', 'observationsRevealed', 'pastorVoteAllowed',
+          'votingStarted', 'memberProposalsEnabled', 'memberObservationsEnabled',
+          'observation', 'observationsRevealed', 'pastorVoteAllowed',
           'expectedVotersCount', 'votesCastCount', 'carryoverElectedNames',
           'tiedCandidateIds', 'electedCandidateIds', 'createdAt', 'updatedAt'
         ])
@@ -158,6 +162,8 @@ service cloud.firestore {
         && data.status in ['open', 'paused', 'closed']
         && (!('proposalsOpen' in data) || data.proposalsOpen is bool)
         && (!('votingStarted' in data) || data.votingStarted is bool)
+        && (!('memberProposalsEnabled' in data) || data.memberProposalsEnabled is bool)
+        && (!('memberObservationsEnabled' in data) || data.memberObservationsEnabled is bool)
         && (!('observation' in data) || data.observation == null || (data.observation is string && data.observation.size() <= 500))
         && (!('observationsRevealed' in data) || data.observationsRevealed is bool)
         && data.pastorVoteAllowed is bool
@@ -245,8 +251,9 @@ service cloud.firestore {
           'sessionId', 'churchName', 'year', 'roundId', 'departmentName',
           'roleTitle', 'votingMode', 'groupedStage', 'leaderRoleTitle',
           'membersRoleTitle', 'totalGroupSeats', 'seats', 'maxProposals', 'isTieBreaker',
-          'roundStatus', 'proposalsOpen', 'votingStarted', 'observation',
-          'observationsRevealed', 'revealedObservations',
+          'roundStatus', 'proposalsOpen', 'votingStarted',
+          'memberProposalsEnabled', 'memberObservationsEnabled',
+          'observation', 'observationsRevealed', 'revealedObservations',
           'showResults', 'votesCastCount', 'expectedVotersCount',
           'candidates', 'updatedAt'
         ])
@@ -267,6 +274,8 @@ service cloud.firestore {
         && data.roundStatus in ['idle', 'open', 'paused', 'closed', 'tie']
         && (!('proposalsOpen' in data) || data.proposalsOpen is bool)
         && (!('votingStarted' in data) || data.votingStarted is bool)
+        && (!('memberProposalsEnabled' in data) || data.memberProposalsEnabled is bool)
+        && (!('memberObservationsEnabled' in data) || data.memberObservationsEnabled is bool)
         && (!('observation' in data) || data.observation == null || (data.observation is string && data.observation.size() <= 500))
         && (!('observationsRevealed' in data) || data.observationsRevealed is bool)
         && (!('revealedObservations' in data) || (data.revealedObservations is list && data.revealedObservations.size() <= 50))
@@ -388,6 +397,7 @@ service cloud.firestore {
                 get(/databases/$(database)/documents/sessions/$(sessionId)/rounds/$(roundId)).data.status == 'open'
                 && get(/databases/$(database)/documents/sessions/$(sessionId)/rounds/$(roundId)).data.isTieBreaker == false
                 && (!('proposalsOpen' in get(/databases/$(database)/documents/sessions/$(sessionId)/rounds/$(roundId)).data) || get(/databases/$(database)/documents/sessions/$(sessionId)/rounds/$(roundId)).data.proposalsOpen == true)
+                && (!('memberProposalsEnabled' in get(/databases/$(database)/documents/sessions/$(sessionId)/rounds/$(roundId)).data) || get(/databases/$(database)/documents/sessions/$(sessionId)/rounds/$(roundId)).data.memberProposalsEnabled == true)
                 && exists(/databases/$(database)/documents/sessions/$(sessionId)/committee/$(incoming().proposedByToken))
                 && get(/databases/$(database)/documents/sessions/$(sessionId)/committee/$(incoming().proposedByToken)).data.enabled == true
               )
@@ -420,6 +430,7 @@ service cloud.firestore {
               )
               || (
                 incoming().authorRole == 'member'
+                && (!('memberObservationsEnabled' in get(/databases/$(database)/documents/sessions/$(sessionId)/rounds/$(roundId)).data) || get(/databases/$(database)/documents/sessions/$(sessionId)/rounds/$(roundId)).data.memberObservationsEnabled == true)
                 && exists(/databases/$(database)/documents/sessions/$(sessionId)/committee/$(incoming().authorToken))
                 && get(/databases/$(database)/documents/sessions/$(sessionId)/committee/$(incoming().authorToken)).data.enabled == true
               )
