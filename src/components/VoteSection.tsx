@@ -28,6 +28,7 @@ import {
   reopenRound,
   setObservationsRevealed,
   setRoundPauseState,
+  setSessionLifecycleStatus,
   submitRoundObservation,
   syncRoundAndProjector,
   updateDepartmentMaxProposals,
@@ -432,6 +433,69 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
     );
   }
 
+  const sessionStatus = session.sessionStatus ?? 'active';
+
+  if (!isAdmin && sessionStatus === 'paused') {
+    return (
+      <div className="max-w-2xl mx-auto px-4 py-10">
+        <div className="bg-white border border-amber-200 rounded-2xl p-8 text-center space-y-4">
+          <div className="w-12 h-12 rounded-2xl bg-amber-50 border border-amber-200 text-amber-800 flex items-center justify-center mx-auto">
+            <Pause className="w-6 h-6" />
+          </div>
+          <p className="text-xs font-medium text-slate-500">
+            {session.churchName} · Período {session.year}
+          </p>
+          <h2 className="text-xl font-bold text-slate-900">Sesión de votación en pausa</h2>
+          <p className="text-sm text-slate-600 max-w-md mx-auto leading-relaxed">
+            {committeeMember ? `Hola ${committeeMember.name}, el ` : 'El '}
+            pastor o secretario pausó la sesión de nombramientos para continuar en otro momento o en
+            otro día. Todo lo avanzado está guardado y{' '}
+            <strong>tu enlace personal seguirá funcionando sin cambios</strong> cuando se reanude la
+            sesión.
+          </p>
+          <div className="pt-2">
+            <button
+              type="button"
+              onClick={onGoToResults}
+              className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl border border-slate-300 bg-white text-slate-800 text-sm font-semibold hover:bg-slate-50 cursor-pointer min-h-[44px]"
+            >
+              Ver resultados guardados
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isAdmin && sessionStatus === 'ended') {
+    return (
+      <div className="max-w-2xl mx-auto px-4 py-10">
+        <div className="bg-white border border-slate-200 rounded-2xl p-8 text-center space-y-4">
+          <div className="w-12 h-12 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-700 flex items-center justify-center mx-auto">
+            <CheckCircle2 className="w-6 h-6" />
+          </div>
+          <p className="text-xs font-medium text-slate-500">
+            {session.churchName} · Período {session.year}
+          </p>
+          <h2 className="text-xl font-bold text-slate-900">Sesión de nombramientos finalizada</h2>
+          <p className="text-sm text-slate-600 max-w-md mx-auto leading-relaxed">
+            La sesión de votación ha concluido. Puedes consultar la lista de nombramientos elegidos
+            en la sección Resultados.
+          </p>
+          <div className="pt-2">
+            <button
+              type="button"
+              onClick={onGoToResults}
+              className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-blue-800 text-white text-sm font-semibold hover:bg-blue-900 cursor-pointer min-h-[44px]"
+            >
+              Ver Resultados
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (!activeRound) {
     return (
       <div className="max-w-2xl mx-auto px-4 py-10">
@@ -451,8 +515,8 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
           </p>
           {isAdmin && (
             <div className="pt-3 border-t border-slate-100 space-y-3">
-              {orderedDepartments.length > 0 && (
-                <div>
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                {orderedDepartments.length > 0 && (
                   <button
                     type="button"
                     onClick={() => openProposalLimitModal()}
@@ -461,8 +525,43 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
                     <SlidersHorizontal className="w-4 h-4 text-blue-800" />
                     Cantidad de propuestas por departamento
                   </button>
-                </div>
-              )}
+                )}
+                <button
+                  type="button"
+                  disabled={savingControl}
+                  onClick={async () => {
+                    setSavingControl(true);
+                    setVoteError(null);
+                    try {
+                      await setSessionLifecycleStatus(
+                        session,
+                        sessionStatus === 'active' ? 'paused' : 'active',
+                        null
+                      );
+                    } catch {
+                      setVoteError('No se pudo actualizar el estado de la sesión.');
+                    } finally {
+                      setSavingControl(false);
+                    }
+                  }}
+                  className={`inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold cursor-pointer disabled:opacity-50 min-h-[44px] ${
+                    sessionStatus === 'active'
+                      ? 'border border-amber-300 bg-amber-50 text-amber-950 hover:bg-amber-100'
+                      : 'bg-blue-800 text-white hover:bg-blue-900'
+                  }`}
+                >
+                  {sessionStatus === 'active' ? (
+                    <>
+                      <Pause className="w-4 h-4" /> Pausar sesión (otro día)
+                    </>
+                  ) : (
+                    <>
+                      <Play className="w-4 h-4" />{' '}
+                      {sessionStatus === 'paused' ? 'Reanudar sesión' : 'Reabrir sesión'}
+                    </>
+                  )}
+                </button>
+              </div>
               <div className="pt-2 space-y-2">
                 <p className="text-xs font-semibold text-slate-600">
                   Permisos para miembros (Pastor / Secretario)
@@ -886,6 +985,41 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
                           : 'Cantidad de propuestas'}
                       </button>
                     )}
+                    <button
+                      type="button"
+                      disabled={savingControl}
+                      onClick={async () => {
+                        setSavingControl(true);
+                        setVoteError(null);
+                        try {
+                          await setSessionLifecycleStatus(
+                            session,
+                            sessionStatus === 'active' ? 'paused' : 'active',
+                            activeRound
+                          );
+                        } catch {
+                          setVoteError('No se pudo actualizar el estado de la sesión.');
+                        } finally {
+                          setSavingControl(false);
+                        }
+                      }}
+                      className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold cursor-pointer disabled:opacity-50 min-h-[40px] ${
+                        sessionStatus === 'active'
+                          ? 'border border-amber-300 bg-amber-50 text-amber-950 hover:bg-amber-100'
+                          : 'bg-blue-800 text-white hover:bg-blue-900'
+                      }`}
+                    >
+                      {sessionStatus === 'active' ? (
+                        <>
+                          <Pause className="w-4 h-4" /> Pausar sesión (otro día)
+                        </>
+                      ) : (
+                        <>
+                          <Play className="w-4 h-4" />{' '}
+                          {sessionStatus === 'paused' ? 'Reanudar sesión' : 'Reabrir sesión'}
+                        </>
+                      )}
+                    </button>
                   </>
                 ) : (
                   <>

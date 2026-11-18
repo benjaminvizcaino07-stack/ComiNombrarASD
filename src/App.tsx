@@ -1,7 +1,17 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { collection, doc, onSnapshot, query, where } from 'firebase/firestore';
-import { BarChart3, CheckSquare, LogOut, Settings, ShieldCheck } from 'lucide-react';
+import {
+  BarChart3,
+  CheckCircle2,
+  CheckSquare,
+  LogOut,
+  Pause,
+  Play,
+  Settings,
+  ShieldCheck,
+  X,
+} from 'lucide-react';
 import { AdminSection } from './components/AdminSection';
 import { ProjectorView } from './components/ProjectorView';
 import { ResultsSection } from './components/ResultsSection';
@@ -13,7 +23,10 @@ import {
   signInWithCredentials,
   signInWithGoogle,
 } from './services/authService';
-import { syncRoundAndProjector } from './services/nominationService';
+import {
+  setSessionLifecycleStatus,
+  syncRoundAndProjector,
+} from './services/nominationService';
 import {
   AppSection,
   CandidateData,
@@ -85,6 +98,11 @@ export default function App() {
   const [ballots, setBallots] = useState<SecretBallot[]>([]);
   const [receiptsCount, setReceiptsCount] = useState(0);
   const [hasVotedCurrentRound, setHasVotedCurrentRound] = useState(false);
+
+  const [showExitModal, setShowExitModal] = useState(false);
+  const [exitActionBusy, setExitActionBusy] = useState<'pause' | 'end' | 'signout' | null>(null);
+  const [exitError, setExitError] = useState<string | null>(null);
+  const [resumingSession, setResumingSession] = useState(false);
 
   const lastSyncedSignatureRef = useRef<string>('');
 
@@ -384,6 +402,7 @@ export default function App() {
       (c) => c.voteCount !== (evalRes.countsById[c.id] ?? 0)
     );
     const shouldAutoClose =
+      (session.sessionStatus ?? 'active') === 'active' &&
       activeRound.status === 'open' &&
       activeRound.votingStarted !== false &&
       activeRound.expectedVotersCount > 0 &&
@@ -391,6 +410,7 @@ export default function App() {
 
     const signature = [
       activeRound.id,
+      session.sessionStatus ?? 'active',
       activeRound.status,
       activeRound.proposalsOpen ? '1' : '0',
       activeRound.votingStarted === false ? '0' : '1',
@@ -476,6 +496,36 @@ export default function App() {
     setSelectedSessionId(id);
   };
 
+  const handleExitWithStatus = async (mode: 'pause' | 'end' | 'signout') => {
+    setExitActionBusy(mode);
+    setExitError(null);
+    try {
+      if (isAdmin && session) {
+        if (mode === 'pause') {
+          await setSessionLifecycleStatus(session, 'paused', activeRound);
+        } else if (mode === 'end') {
+          await setSessionLifecycleStatus(session, 'ended', activeRound);
+        }
+      }
+      setShowExitModal(false);
+      await signOut(auth);
+    } catch {
+      setExitError('No se pudo guardar el estado de la sesión. Verifica tu conexión e intenta nuevamente.');
+    } finally {
+      setExitActionBusy(null);
+    }
+  };
+
+  const handleResumeSession = async () => {
+    if (!isAdmin || !session) return;
+    setResumingSession(true);
+    try {
+      await setSessionLifecycleStatus(session, 'active', activeRound);
+    } finally {
+      setResumingSession(false);
+    }
+  };
+
   const effectiveActiveSection: AppSection =
     isCommitteeMode && activeSection === 'admin' ? 'vote' : activeSection;
 
@@ -538,7 +588,14 @@ export default function App() {
             {user && !isCommitteeMode ? (
               <button
                 type="button"
-                onClick={() => signOut(auth)}
+                onClick={() => {
+                  if (isAdmin && session) {
+                    setExitError(null);
+                    setShowExitModal(true);
+                  } else {
+                    void signOut(auth);
+                  }
+                }}
                 className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-100 cursor-pointer whitespace-nowrap shrink-0 min-h-[40px]"
               >
                 <LogOut className="w-4 h-4" />
@@ -561,6 +618,55 @@ export default function App() {
           </div>
         </div>
       </header>
+
+      {/* Admin Session Paused / Ended Banner */}
+      {isAdmin &&
+        session &&
+        (session.sessionStatus === 'paused' || session.sessionStatus === 'ended') && (
+          <div
+            className={`no-print border-b px-4 py-3 ${
+              session.sessionStatus === 'paused'
+                ? 'bg-amber-50 border-amber-200 text-amber-950'
+                : 'bg-slate-100 border-slate-200 text-slate-900'
+            }`}
+          >
+            <div className="max-w-6xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-start sm:items-center gap-2.5 text-sm">
+                {session.sessionStatus === 'paused' ? (
+                  <Pause className="w-4 h-4 text-amber-800 shrink-0 mt-0.5 sm:mt-0" />
+                ) : (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5 sm:mt-0" />
+                )}
+                <p>
+                  {session.sessionStatus === 'paused' ? (
+                    <>
+                      <strong>Sesión de votación en pausa.</strong> Todo el progreso, votos y
+                      enlaces de los miembros siguen guardados para reanudar cuando desees.
+                    </>
+                  ) : (
+                    <>
+                      <strong>Sesión de votación finalizada.</strong> Los resultados están guardados
+                      y los miembros pueden consultar la lista final.
+                    </>
+                  )}
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={resumingSession}
+                onClick={handleResumeSession}
+                className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-blue-800 text-white text-xs font-semibold hover:bg-blue-900 cursor-pointer disabled:opacity-50 min-h-[40px] whitespace-nowrap shrink-0 self-start sm:self-auto"
+              >
+                <Play className="w-3.5 h-3.5" />
+                {resumingSession
+                  ? 'Reanudando...'
+                  : session.sessionStatus === 'paused'
+                    ? 'Reanudar sesión'
+                    : 'Reabrir sesión'}
+              </button>
+            </div>
+          </div>
+        )}
 
       {/* Main Content */}
       <main className="flex-1">
@@ -643,6 +749,124 @@ export default function App() {
           );
         })}
       </nav>
+
+      {/* Exit Session Confirmation Modal (Pause for later vs Ended) */}
+      {showExitModal && isAdmin && session && (
+        <div className="no-print fixed inset-0 z-50 bg-slate-950/55 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-200 rounded-2xl max-w-lg w-full overflow-hidden">
+            <div className="p-5 border-b border-slate-200 flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-bold text-slate-900">
+                  ¿Cómo deseas salir de la sesión?
+                </h3>
+                <p className="text-xs text-slate-600 mt-0.5">
+                  {session.churchName} · Período {session.year}
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={exitActionBusy !== null}
+                onClick={() => setShowExitModal(false)}
+                className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 cursor-pointer disabled:opacity-50"
+                aria-label="Cerrar"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <p className="text-sm text-slate-700 leading-relaxed">
+                Indica si la sesión de votación ha terminado o si la estás pausando para
+                continuar en otro día. Todo lo avanzado quedará guardado en la nube.
+              </p>
+
+              {activeRound && activeRound.status === 'open' && (
+                <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-950">
+                  Hay una votación abierta para <strong>{activeRound.roleTitle}</strong>. Si pausas,
+                  se guardarán los candidatos, votos y enlaces exactamente como están para
+                  reanudar después.
+                </div>
+              )}
+
+              {exitError && (
+                <div
+                  role="alert"
+                  className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-800"
+                >
+                  {exitError}
+                </div>
+              )}
+
+              <div className="space-y-2.5">
+                <button
+                  type="button"
+                  disabled={exitActionBusy !== null}
+                  onClick={() => handleExitWithStatus('pause')}
+                  className="w-full text-left p-4 rounded-xl border-2 border-blue-800 bg-blue-50/70 hover:bg-blue-100/70 transition-colors cursor-pointer disabled:opacity-60 flex items-start gap-3"
+                >
+                  <div className="w-9 h-9 rounded-lg bg-blue-800 text-white flex items-center justify-center shrink-0 mt-0.5">
+                    <Pause className="w-4 h-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-bold text-slate-900">
+                      {exitActionBusy === 'pause'
+                        ? 'Guardando y pausando sesión...'
+                        : 'Pausar sesión para reanudar otro día'}
+                    </p>
+                    <p className="text-xs text-slate-600 mt-0.5 leading-relaxed">
+                      Guarda todos los cargos, votos, observaciones y mantiene activos los enlaces
+                      personales de cada miembro para continuar más adelante.
+                    </p>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={exitActionBusy !== null}
+                  onClick={() => handleExitWithStatus('end')}
+                  className="w-full text-left p-4 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 transition-colors cursor-pointer disabled:opacity-60 flex items-start gap-3"
+                >
+                  <div className="w-9 h-9 rounded-lg bg-slate-900 text-white flex items-center justify-center shrink-0 mt-0.5">
+                    <CheckCircle2 className="w-4 h-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-bold text-slate-900">
+                      {exitActionBusy === 'end'
+                        ? 'Finalizando sesión...'
+                        : 'Sí, se terminó la sesión de votación'}
+                    </p>
+                    <p className="text-xs text-slate-600 mt-0.5 leading-relaxed">
+                      Marca la comisión como finalizada y conserva todos los resultados listos para
+                      consulta o impresión.
+                    </p>
+                  </div>
+                </button>
+              </div>
+
+              <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
+                <button
+                  type="button"
+                  disabled={exitActionBusy !== null}
+                  onClick={() => handleExitWithStatus('signout')}
+                  className="text-xs font-semibold text-slate-500 hover:text-slate-800 cursor-pointer disabled:opacity-50"
+                >
+                  {exitActionBusy === 'signout'
+                    ? 'Cerrando acceso...'
+                    : 'Salir sin cambiar el estado actual'}
+                </button>
+                <button
+                  type="button"
+                  disabled={exitActionBusy !== null}
+                  onClick={() => setShowExitModal(false)}
+                  className="px-4 py-2 rounded-xl border border-slate-300 bg-white text-slate-700 text-sm font-semibold hover:bg-slate-50 cursor-pointer min-h-[40px]"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

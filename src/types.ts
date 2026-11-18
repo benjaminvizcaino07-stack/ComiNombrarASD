@@ -10,6 +10,8 @@ export type GroupedRoundStage = 'leader' | 'members_tiebreaker';
 
 export type RoundStatus = 'open' | 'paused' | 'closed';
 
+export type SessionStatus = 'active' | 'paused' | 'ended';
+
 export interface SessionData {
   id: string;
   ownerId: string;
@@ -27,6 +29,7 @@ export interface SessionData {
   enabledCommitteeCount: number;
   allowMemberProposals?: boolean;
   allowMemberObservations?: boolean;
+  sessionStatus?: SessionStatus;
   createdAt?: unknown;
   updatedAt?: unknown;
 }
@@ -165,6 +168,7 @@ export interface ProjectorState {
   seats?: number;
   maxProposals?: number | null;
   isTieBreaker?: boolean;
+  sessionStatus?: SessionStatus;
   roundStatus: 'idle' | 'open' | 'paused' | 'closed' | 'tie';
   proposalsOpen?: boolean;
   votingStarted?: boolean;

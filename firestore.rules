@@ -40,6 +40,11 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/sessions/$(sessionId)).data.ownerId == request.auth.uid;
     }
 
+    function isSessionActive(sessionId) {
+      return !('sessionStatus' in get(/databases/$(database)/documents/sessions/$(sessionId)).data)
+        || get(/databases/$(database)/documents/sessions/$(sessionId)).data.sessionStatus == 'active';
+    }
+
     // --- Validation Blueprints ---
     function isValidSession(data) {
       return data.keys().hasAll([
@@ -52,7 +57,7 @@ service cloud.firestore {
           'pastorName', 'secretaryName', 'meetingDate', 'meetingTime',
           'projectorKey', 'activeRoundId', 'showResultsOnProjector',
           'pastorVoteEnabledOverride', 'enabledCommitteeCount',
-          'allowMemberProposals', 'allowMemberObservations',
+          'allowMemberProposals', 'allowMemberObservations', 'sessionStatus',
           'createdAt', 'updatedAt'
         ])
         && isValidId(data.ownerId)
@@ -70,6 +75,7 @@ service cloud.firestore {
         && data.enabledCommitteeCount is int && data.enabledCommitteeCount >= 0 && data.enabledCommitteeCount <= 200
         && (!('allowMemberProposals' in data) || data.allowMemberProposals is bool)
         && (!('allowMemberObservations' in data) || data.allowMemberObservations is bool)
+        && (!('sessionStatus' in data) || data.sessionStatus in ['active', 'paused', 'ended'])
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
@@ -251,7 +257,7 @@ service cloud.firestore {
           'sessionId', 'churchName', 'year', 'roundId', 'departmentName',
           'roleTitle', 'votingMode', 'groupedStage', 'leaderRoleTitle',
           'membersRoleTitle', 'totalGroupSeats', 'seats', 'maxProposals', 'isTieBreaker',
-          'roundStatus', 'proposalsOpen', 'votingStarted',
+          'sessionStatus', 'roundStatus', 'proposalsOpen', 'votingStarted',
           'memberProposalsEnabled', 'memberObservationsEnabled',
           'observation', 'observationsRevealed', 'revealedObservations',
           'showResults', 'votesCastCount', 'expectedVotersCount',
@@ -271,6 +277,7 @@ service cloud.firestore {
         && (!('seats' in data) || (data.seats is int && data.seats >= 1 && data.seats <= 50))
         && (!('maxProposals' in data) || data.maxProposals == null || (data.maxProposals is int && data.maxProposals >= 1 && data.maxProposals <= 50))
         && (!('isTieBreaker' in data) || data.isTieBreaker is bool)
+        && (!('sessionStatus' in data) || data.sessionStatus in ['active', 'paused', 'ended'])
         && data.roundStatus in ['idle', 'open', 'paused', 'closed', 'tie']
         && (!('proposalsOpen' in data) || data.proposalsOpen is bool)
         && (!('votingStarted' in data) || data.votingStarted is bool)
@@ -371,7 +378,8 @@ service cloud.firestore {
           && (
             isSessionAdmin(sessionId)
             || (
-              existing().status == 'open'
+              isSessionActive(sessionId)
+              && existing().status == 'open'
               && incoming().diff(existing()).affectedKeys().hasOnly(['votesCastCount', 'updatedAt'])
               && incoming().votesCastCount == existing().votesCastCount + 1
               && incoming().votesCastCount <= existing().expectedVotersCount
@@ -394,7 +402,8 @@ service cloud.firestore {
             && (
               isSessionAdmin(sessionId)
               || (
-                get(/databases/$(database)/documents/sessions/$(sessionId)/rounds/$(roundId)).data.status == 'open'
+                isSessionActive(sessionId)
+                && get(/databases/$(database)/documents/sessions/$(sessionId)/rounds/$(roundId)).data.status == 'open'
                 && get(/databases/$(database)/documents/sessions/$(sessionId)/rounds/$(roundId)).data.isTieBreaker == false
                 && (!('proposalsOpen' in get(/databases/$(database)/documents/sessions/$(sessionId)/rounds/$(roundId)).data) || get(/databases/$(database)/documents/sessions/$(sessionId)/rounds/$(roundId)).data.proposalsOpen == true)
                 && (!('memberProposalsEnabled' in get(/databases/$(database)/documents/sessions/$(sessionId)/rounds/$(roundId)).data) || get(/databases/$(database)/documents/sessions/$(sessionId)/rounds/$(roundId)).data.memberProposalsEnabled == true)
@@ -429,7 +438,8 @@ service cloud.firestore {
                 && incoming().authorToken == ('pastor_' + request.auth.uid)
               )
               || (
-                incoming().authorRole == 'member'
+                isSessionActive(sessionId)
+                && incoming().authorRole == 'member'
                 && (!('memberObservationsEnabled' in get(/databases/$(database)/documents/sessions/$(sessionId)/rounds/$(roundId)).data) || get(/databases/$(database)/documents/sessions/$(sessionId)/rounds/$(roundId)).data.memberObservationsEnabled == true)
                 && exists(/databases/$(database)/documents/sessions/$(sessionId)/committee/$(incoming().authorToken))
                 && get(/databases/$(database)/documents/sessions/$(sessionId)/committee/$(incoming().authorToken)).data.enabled == true
@@ -463,6 +473,7 @@ service cloud.firestore {
             && incoming().castAt == request.time
             && !exists(/databases/$(database)/documents/sessions/$(sessionId)/rounds/$(roundId)/receipts/$(receiptId))
             && get(/databases/$(database)/documents/sessions/$(sessionId)/rounds/$(roundId)).data.status == 'open'
+            && isSessionActive(sessionId)
             && (!('votingStarted' in get(/databases/$(database)/documents/sessions/$(sessionId)/rounds/$(roundId)).data) || get(/databases/$(database)/documents/sessions/$(sessionId)/rounds/$(roundId)).data.votingStarted == true)
             && (
               (
@@ -485,6 +496,7 @@ service cloud.firestore {
           allow create: if isValidId(sessionId)
             && isValidId(roundId)
             && isValidId(ballotId)
+            && isSessionActive(sessionId)
             && get(/databases/$(database)/documents/sessions/$(sessionId)/rounds/$(roundId)).data.status == 'open'
             && (!('votingStarted' in get(/databases/$(database)/documents/sessions/$(sessionId)/rounds/$(roundId)).data) || get(/databases/$(database)/documents/sessions/$(sessionId)/rounds/$(roundId)).data.votingStarted == true)
             && isValidBallot(incoming(), sessionId, roundId, get(/databases/$(database)/documents/sessions/$(sessionId)/rounds/$(roundId)).data.seats)

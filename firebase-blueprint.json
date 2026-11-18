@@ -68,6 +68,10 @@
         "allowMemberObservations": {
           "type": "boolean"
         },
+        "sessionStatus": {
+          "type": "string",
+          "enum": ["active", "paused", "ended"]
+        },
         "createdAt": {
           "type": "string",
           "format": "date-time"
@@ -526,6 +530,10 @@
         },
         "isTieBreaker": {
           "type": "boolean"
+        },
+        "sessionStatus": {
+          "type": "string",
+          "enum": ["active", "paused", "ended"]
         },
         "roundStatus": {
           "type": "string",

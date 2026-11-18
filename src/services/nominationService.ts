@@ -24,6 +24,7 @@ import {
   RoundObservation,
   SecretBallot,
   SessionData,
+  SessionStatus,
 } from '../types';
 import { generateSecureId } from '../utils/id';
 import {
@@ -59,6 +60,7 @@ export async function createSession(
       enabledCommitteeCount: 0,
       allowMemberProposals: true,
       allowMemberObservations: true,
+      sessionStatus: 'active',
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
@@ -72,6 +74,7 @@ export async function createSession(
       roleTitle: '',
       seats: 1,
       isTieBreaker: false,
+      sessionStatus: 'active',
       roundStatus: 'idle',
       memberProposalsEnabled: true,
       memberObservationsEnabled: true,
@@ -621,6 +624,7 @@ export async function startRoundForDepartment(params: {
 
     batch.update(doc(db, 'sessions', session.id), {
       activeRoundId: roundId,
+      sessionStatus: 'active',
       updatedAt: serverTimestamp(),
     });
 
@@ -635,6 +639,7 @@ export async function startRoundForDepartment(params: {
       seats: ballotSeats,
       maxProposals,
       isTieBreaker,
+      sessionStatus: 'active',
       roundStatus: 'open',
       proposalsOpen: !isTieBreaker,
       votingStarted: isTieBreaker,
@@ -758,10 +763,21 @@ export async function setRoundPauseState(
       status: nextDeptStatus,
       updatedAt: serverTimestamp(),
     });
-    batch.update(doc(db, 'sessions', session.id, 'projector', session.projectorKey), {
+    const projectorUpdates: Record<string, unknown> = {
       roundStatus: nextRoundStatus,
       updatedAt: serverTimestamp(),
-    });
+    };
+    if (!paused) {
+      batch.update(doc(db, 'sessions', session.id), {
+        sessionStatus: 'active',
+        updatedAt: serverTimestamp(),
+      });
+      projectorUpdates.sessionStatus = 'active';
+    }
+    batch.update(
+      doc(db, 'sessions', session.id, 'projector', session.projectorKey),
+      projectorUpdates
+    );
     await batch.commit();
   } catch (err) {
     handleFirestoreError(err, OperationType.UPDATE, path);
@@ -891,6 +907,59 @@ export async function updateMemberParticipationPermissions(
         projectorUpdates
       );
     }
+    await batch.commit();
+  } catch (err) {
+    handleFirestoreError(err, OperationType.UPDATE, path);
+  }
+}
+
+export async function setSessionLifecycleStatus(
+  session: SessionData,
+  nextStatus: SessionStatus,
+  activeRound?: RoundData | null
+): Promise<void> {
+  const path = `sessions/${session.id}`;
+  try {
+    const batch = writeBatch(db);
+    batch.update(doc(db, 'sessions', session.id), {
+      sessionStatus: nextStatus,
+      updatedAt: serverTimestamp(),
+    });
+
+    const projectorUpdates: Record<string, unknown> = {
+      sessionStatus: nextStatus,
+      updatedAt: serverTimestamp(),
+    };
+
+    if (activeRound) {
+      if ((nextStatus === 'paused' || nextStatus === 'ended') && activeRound.status === 'open') {
+        batch.update(doc(db, 'sessions', session.id, 'rounds', activeRound.id), {
+          status: 'paused',
+          updatedAt: serverTimestamp(),
+        });
+        batch.update(doc(db, 'sessions', session.id, 'departments', activeRound.departmentId), {
+          status: 'paused',
+          updatedAt: serverTimestamp(),
+        });
+        projectorUpdates.roundStatus = 'paused';
+      } else if (nextStatus === 'active' && activeRound.status === 'paused') {
+        batch.update(doc(db, 'sessions', session.id, 'rounds', activeRound.id), {
+          status: 'open',
+          updatedAt: serverTimestamp(),
+        });
+        batch.update(doc(db, 'sessions', session.id, 'departments', activeRound.departmentId), {
+          status: 'voting',
+          updatedAt: serverTimestamp(),
+        });
+        projectorUpdates.roundStatus = 'open';
+      }
+    }
+
+    batch.update(
+      doc(db, 'sessions', session.id, 'projector', session.projectorKey),
+      projectorUpdates
+    );
+
     await batch.commit();
   } catch (err) {
     handleFirestoreError(err, OperationType.UPDATE, path);
@@ -1199,6 +1268,7 @@ export async function syncRoundAndProjector(params: {
         seats: round.seats,
         maxProposals: round.maxProposals ?? null,
         isTieBreaker: round.isTieBreaker,
+        sessionStatus: session.sessionStatus ?? 'active',
         roundStatus: evalResult.hasTie ? 'tie' : 'closed',
         proposalsOpen: false,
         votingStarted: round.votingStarted ?? true,
@@ -1289,6 +1359,7 @@ export async function syncRoundAndProjector(params: {
       seats: round.seats,
       maxProposals: round.maxProposals ?? null,
       isTieBreaker: round.isTieBreaker,
+      sessionStatus: session.sessionStatus ?? 'active',
       roundStatus: projStatus,
       proposalsOpen: round.proposalsOpen ?? !round.isTieBreaker,
       votingStarted: round.votingStarted ?? true,

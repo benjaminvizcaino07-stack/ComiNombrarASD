@@ -103,7 +103,28 @@ export const ProjectorView: React.FC<ProjectorViewProps> = ({ sessionId, project
 
       {/* Main Content */}
       <main className="flex-1 flex flex-col justify-center py-8 max-w-6xl w-full mx-auto space-y-8">
-        {state.roundStatus === 'idle' || !state.roleTitle ? (
+        {state.sessionStatus === 'paused' ? (
+          <div className="text-center space-y-4 py-16">
+            <Monitor className="w-16 h-16 text-amber-400 mx-auto" />
+            <h2 className="text-3xl sm:text-5xl font-bold text-white text-balance">
+              Sesión de votación en pausa
+            </h2>
+            <p className="text-lg text-slate-300 max-w-2xl mx-auto">
+              Todo el progreso, votos registrados y enlaces de los miembros se han guardado. La
+              comisión reanudará esta sesión en el próximo encuentro.
+            </p>
+          </div>
+        ) : state.sessionStatus === 'ended' ? (
+          <div className="text-center space-y-4 py-16">
+            <CheckCircle2 className="w-16 h-16 text-emerald-400 mx-auto" />
+            <h2 className="text-3xl sm:text-5xl font-bold text-white text-balance">
+              Sesión de nombramientos finalizada
+            </h2>
+            <p className="text-lg text-slate-300 max-w-xl mx-auto">
+              Gracias por su participación. Los resultados han quedado guardados.
+            </p>
+          </div>
+        ) : state.roundStatus === 'idle' || !state.roleTitle ? (
           <div className="text-center space-y-4 py-16">
             <Monitor className="w-16 h-16 text-blue-400 mx-auto" />
             <h2 className="text-3xl sm:text-5xl font-bold text-white text-balance">

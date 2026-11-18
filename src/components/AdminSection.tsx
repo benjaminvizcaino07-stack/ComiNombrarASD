@@ -43,6 +43,7 @@ import {
   deleteDepartmentPosition,
   deleteEligibleMember,
   setRoundPauseState,
+  setSessionLifecycleStatus,
   startRoundForDepartment,
   toggleCommitteeMember,
   toggleEligibleMember,
@@ -482,6 +483,12 @@ export const AdminSection: React.FC<AdminSectionProps> = ({
                     <p className="font-semibold text-slate-900">{s.churchName}</p>
                     <p className="text-xs text-slate-500">
                       Período {s.year} · {s.enabledCommitteeCount} integrantes habilitados
+                      {s.sessionStatus === 'paused' && (
+                        <span className="font-semibold text-amber-800"> · En pausa</span>
+                      )}
+                      {s.sessionStatus === 'ended' && (
+                        <span className="font-semibold text-emerald-700"> · Finalizada</span>
+                      )}
                     </p>
                   </div>
                   <button
@@ -489,7 +496,7 @@ export const AdminSection: React.FC<AdminSectionProps> = ({
                     onClick={() => onSelectSession(s.id)}
                     className="px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-800 transition-colors cursor-pointer whitespace-nowrap"
                   >
-                    Abrir comisión
+                    {s.sessionStatus === 'paused' ? 'Reanudar comisión' : 'Abrir comisión'}
                   </button>
                 </div>
               ))}
@@ -982,6 +989,51 @@ export const AdminSection: React.FC<AdminSectionProps> = ({
               </strong>{' '}
               miembros aptos
             </span>
+            {(session.sessionStatus ?? 'active') === 'active' ? (
+              <button
+                type="button"
+                disabled={busyAction === 'session-lifecycle'}
+                onClick={async () => {
+                  setActionError(null);
+                  setBusyAction('session-lifecycle');
+                  try {
+                    await setSessionLifecycleStatus(session, 'paused', activeRound);
+                    flashNotice(
+                      'Sesión pausada. Todo quedó guardado y los enlaces de los miembros siguen activos para reanudar otro día.'
+                    );
+                  } catch (err) {
+                    setActionError(extractUserErrorMessage(err));
+                  } finally {
+                    setBusyAction(null);
+                  }
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-amber-300 bg-amber-50 text-amber-950 text-xs font-semibold hover:bg-amber-100 cursor-pointer disabled:opacity-50 min-h-[36px]"
+              >
+                <Pause className="w-3.5 h-3.5" />
+                Pausar sesión (otro día)
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled={busyAction === 'session-lifecycle'}
+                onClick={async () => {
+                  setActionError(null);
+                  setBusyAction('session-lifecycle');
+                  try {
+                    await setSessionLifecycleStatus(session, 'active', activeRound);
+                    flashNotice('Sesión reanudada. Los enlaces de los miembros ya están activos.');
+                  } catch (err) {
+                    setActionError(extractUserErrorMessage(err));
+                  } finally {
+                    setBusyAction(null);
+                  }
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-800 text-white text-xs font-semibold hover:bg-blue-900 cursor-pointer disabled:opacity-50 min-h-[36px]"
+              >
+                <Play className="w-3.5 h-3.5" />
+                {session.sessionStatus === 'paused' ? 'Reanudar sesión' : 'Reabrir sesión'}
+              </button>
+            )}
           </div>
         </div>
 
@@ -2155,7 +2207,15 @@ export const AdminSection: React.FC<AdminSectionProps> = ({
                     <p className="text-sm font-semibold text-slate-900 truncate">
                       {s.churchName}
                     </p>
-                    <p className="text-xs text-slate-500">Período {s.year}</p>
+                    <p className="text-xs text-slate-500">
+                      Período {s.year}
+                      {s.sessionStatus === 'paused' && (
+                        <span className="font-semibold text-amber-800"> · En pausa</span>
+                      )}
+                      {s.sessionStatus === 'ended' && (
+                        <span className="font-semibold text-emerald-700"> · Finalizada</span>
+                      )}
+                    </p>
                   </div>
                   {s.id === session.id ? (
                     <span className="text-xs font-semibold text-blue-800">Activa</span>
