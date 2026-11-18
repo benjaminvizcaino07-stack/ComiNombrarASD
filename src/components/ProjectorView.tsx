@@ -167,7 +167,11 @@ export const ProjectorView: React.FC<ProjectorViewProps> = ({ sessionId, project
                   )}
                   {state.roundStatus === 'open' && (
                     <div className="inline-flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-blue-500/20 border border-blue-400/40 text-blue-200 font-bold text-lg">
-                      VOTACIÓN EN CURSO
+                      {state.votingStarted === false
+                        ? state.proposalsOpen === false
+                          ? 'OBSERVACIÓN PREVIA AL VOTO'
+                          : 'PROPUESTAS Y OBSERVACIÓN'
+                        : 'VOTACIÓN EN CURSO'}
                     </div>
                   )}
                   {state.roundStatus === 'paused' && (
@@ -185,6 +189,13 @@ export const ProjectorView: React.FC<ProjectorViewProps> = ({ sessionId, project
                   style={{ width: `${progressPct}%` }}
                 />
               </div>
+
+              {state.observation && state.observation.trim() && (
+                <div className="rounded-2xl bg-amber-500/15 border border-amber-400/40 px-5 py-3.5 text-amber-100 text-base sm:text-lg">
+                  <span className="font-bold text-amber-300">Observación: </span>
+                  {state.observation}
+                </div>
+              )}
             </div>
 
             {!state.showResults ? (

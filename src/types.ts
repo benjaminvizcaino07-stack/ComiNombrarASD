@@ -78,6 +78,9 @@ export interface RoundData {
   isTieBreaker: boolean;
   roundNumber: number;
   status: RoundStatus;
+  proposalsOpen?: boolean;
+  votingStarted?: boolean;
+  observation?: string | null;
   pastorVoteAllowed: boolean;
   expectedVotersCount: number;
   votesCastCount: number;
@@ -132,6 +135,9 @@ export interface ProjectorState {
   seats?: number;
   isTieBreaker?: boolean;
   roundStatus: 'idle' | 'open' | 'paused' | 'closed' | 'tie';
+  proposalsOpen?: boolean;
+  votingStarted?: boolean;
+  observation?: string | null;
   showResults: boolean;
   votesCastCount: number;
   expectedVotersCount: number;

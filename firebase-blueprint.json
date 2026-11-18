@@ -269,6 +269,16 @@
           "type": "string",
           "enum": ["open", "paused", "closed"]
         },
+        "proposalsOpen": {
+          "type": "boolean"
+        },
+        "votingStarted": {
+          "type": "boolean"
+        },
+        "observation": {
+          "type": "string",
+          "maxLength": 500
+        },
         "pastorVoteAllowed": {
           "type": "boolean"
         },
@@ -480,6 +490,16 @@
         "roundStatus": {
           "type": "string",
           "enum": ["idle", "open", "paused", "closed", "tie"]
+        },
+        "proposalsOpen": {
+          "type": "boolean"
+        },
+        "votingStarted": {
+          "type": "boolean"
+        },
+        "observation": {
+          "type": "string",
+          "maxLength": 500
         },
         "showResults": {
           "type": "boolean"

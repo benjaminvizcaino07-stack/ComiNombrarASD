@@ -528,6 +528,9 @@ export async function startRoundForDepartment(params: {
       isTieBreaker,
       roundNumber,
       status: 'open',
+      proposalsOpen: !isTieBreaker,
+      votingStarted: isTieBreaker,
+      observation: null,
       pastorVoteAllowed,
       expectedVotersCount,
       votesCastCount: 0,
@@ -603,6 +606,9 @@ export async function startRoundForDepartment(params: {
       seats: ballotSeats,
       isTieBreaker,
       roundStatus: 'open',
+      proposalsOpen: !isTieBreaker,
+      votingStarted: isTieBreaker,
+      observation: null,
       showResults: session.showResultsOnProjector,
       votesCastCount: 0,
       expectedVotersCount,
@@ -722,6 +728,46 @@ export async function setRoundPauseState(
       roundStatus: nextRoundStatus,
       updatedAt: serverTimestamp(),
     });
+    await batch.commit();
+  } catch (err) {
+    handleFirestoreError(err, OperationType.UPDATE, path);
+  }
+}
+
+export async function updateRoundControl(
+  session: SessionData,
+  round: RoundData,
+  updates: Partial<{
+    proposalsOpen: boolean;
+    votingStarted: boolean;
+    observation: string | null;
+  }>
+): Promise<void> {
+  const path = `sessions/${session.id}/rounds/${round.id}`;
+  try {
+    const batch = writeBatch(db);
+    const roundUpdates: Record<string, unknown> = { updatedAt: serverTimestamp() };
+    const projectorUpdates: Record<string, unknown> = { updatedAt: serverTimestamp() };
+
+    if (updates.proposalsOpen !== undefined) {
+      roundUpdates.proposalsOpen = updates.proposalsOpen;
+      projectorUpdates.proposalsOpen = updates.proposalsOpen;
+    }
+    if (updates.votingStarted !== undefined) {
+      roundUpdates.votingStarted = updates.votingStarted;
+      projectorUpdates.votingStarted = updates.votingStarted;
+    }
+    if (updates.observation !== undefined) {
+      const cleanObs = updates.observation ? clampString(updates.observation, 500) : null;
+      roundUpdates.observation = cleanObs;
+      projectorUpdates.observation = cleanObs;
+    }
+
+    batch.update(doc(db, 'sessions', session.id, 'rounds', round.id), roundUpdates);
+    batch.update(
+      doc(db, 'sessions', session.id, 'projector', session.projectorKey),
+      projectorUpdates
+    );
     await batch.commit();
   } catch (err) {
     handleFirestoreError(err, OperationType.UPDATE, path);
@@ -914,6 +960,9 @@ export async function syncRoundAndProjector(params: {
         seats: round.seats,
         isTieBreaker: round.isTieBreaker,
         roundStatus: evalResult.hasTie ? 'tie' : 'closed',
+        proposalsOpen: false,
+        votingStarted: round.votingStarted ?? true,
+        observation: round.observation ?? null,
         showResults: session.showResultsOnProjector,
         votesCastCount: receiptsCount,
         expectedVotersCount: round.expectedVotersCount,
@@ -991,6 +1040,9 @@ export async function syncRoundAndProjector(params: {
       seats: round.seats,
       isTieBreaker: round.isTieBreaker,
       roundStatus: projStatus,
+      proposalsOpen: round.proposalsOpen ?? !round.isTieBreaker,
+      votingStarted: round.votingStarted ?? true,
+      observation: round.observation ?? null,
       showResults: session.showResultsOnProjector,
       votesCastCount: receiptsCount,
       expectedVotersCount: round.expectedVotersCount,

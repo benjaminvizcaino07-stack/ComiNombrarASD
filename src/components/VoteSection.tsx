@@ -1,7 +1,8 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   CheckCircle2,
   Lock,
+  MessageSquareText,
   Pause,
   Play,
   Plus,
@@ -9,6 +10,7 @@ import {
   Search,
   Shield,
   Trash2,
+  Unlock,
   UserPlus,
   Users,
 } from 'lucide-react';
@@ -19,6 +21,7 @@ import {
   reopenRound,
   setRoundPauseState,
   syncRoundAndProjector,
+  updateRoundControl,
 } from '../services/nominationService';
 import {
   CandidateData,
@@ -61,7 +64,13 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [submittingVote, setSubmittingVote] = useState(false);
   const [proposing, setProposing] = useState(false);
+  const [savingControl, setSavingControl] = useState(false);
+  const [observationDraft, setObservationDraft] = useState('');
   const [voteError, setVoteError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setObservationDraft(activeRound?.observation ?? '');
+  }, [activeRound?.id, activeRound?.observation]);
 
   const canCommitteeVote = Boolean(committeeMember && committeeMember.enabled);
   const canPastorVote = Boolean(
@@ -148,9 +157,36 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
   const totalGroupSeats = activeRound.totalGroupSeats ?? activeRound.seats;
   const leaderTitle = activeRound.leaderRoleTitle || 'Cargo Principal';
   const membersTitle = activeRound.membersRoleTitle || 'Integrantes';
+  const proposalsOpen = activeRound.isTieBreaker
+    ? false
+    : (activeRound.proposalsOpen ?? true);
+  const votingStarted = activeRound.votingStarted ?? true;
+
+  const handleControlUpdate = async (updates: {
+    proposalsOpen?: boolean;
+    votingStarted?: boolean;
+    observation?: string | null;
+  }) => {
+    setSavingControl(true);
+    setVoteError(null);
+    try {
+      await updateRoundControl(session, activeRound, updates);
+    } catch {
+      setVoteError('No se pudo actualizar el control de la votación. Intenta nuevamente.');
+    } finally {
+      setSavingControl(false);
+    }
+  };
 
   const toggleSelection = (candidateId: string) => {
-    if (hasVotedCurrentRound || activeRound.status !== 'open' || !voterReceiptId) return;
+    if (
+      hasVotedCurrentRound ||
+      activeRound.status !== 'open' ||
+      !votingStarted ||
+      !voterReceiptId
+    ) {
+      return;
+    }
     setVoteError(null);
 
     if (activeRound.seats === 1) {
@@ -173,6 +209,7 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
   };
 
   const handlePropose = async (nameToPropose: string) => {
+    if (!proposalsOpen || activeRound.status !== 'open' || activeRound.isTieBreaker) return;
     const clean = nameToPropose.trim();
     if (!clean) return;
     const duplicate = candidates.some(
@@ -194,7 +231,7 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
       setShowSuggestions(false);
     } catch {
       setVoteError(
-        'No se pudo agregar la propuesta. Verifica tu conexión o si la votación sigue abierta.'
+        'No se pudo agregar la propuesta. Verifica tu conexión o si las propuestas siguen abiertas.'
       );
     } finally {
       setProposing(false);
@@ -202,7 +239,14 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
   };
 
   const handleCastVote = async () => {
-    if (!voterReceiptId || selectedIds.length === 0 || activeRound.status !== 'open') return;
+    if (
+      !voterReceiptId ||
+      selectedIds.length === 0 ||
+      activeRound.status !== 'open' ||
+      !votingStarted
+    ) {
+      return;
+    }
     if (selectedIds.length > activeRound.seats) return;
 
     setSubmittingVote(true);
@@ -242,6 +286,24 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
                 <span aria-hidden="true">·</span>
                 <span className="font-bold text-amber-800">
                   Desempate (Ronda {activeRound.roundNumber})
+                </span>
+              </>
+            )}
+            {activeRound.status === 'open' && (
+              <>
+                <span aria-hidden="true">·</span>
+                <span
+                  className={`font-semibold ${
+                    !votingStarted ? 'text-amber-800' : 'text-emerald-800'
+                  }`}
+                >
+                  {!votingStarted
+                    ? proposalsOpen
+                      ? 'Fase: Propuestas y observación'
+                      : 'Fase: Observación previa al voto'
+                    : proposalsOpen
+                      ? 'Votación abierta · Propuestas abiertas'
+                      : 'Votación abierta · Propuestas cerradas'}
                 </span>
               </>
             )}
@@ -311,87 +373,218 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
 
         {/* Admin Quick Round Controls */}
         {isAdmin && (
-          <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3">
-            <div className="flex flex-wrap gap-2">
-              {activeRound.status !== 'closed' ? (
-                <>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setRoundPauseState(session, activeRound, activeRound.status === 'open')
-                    }
-                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-300 bg-white text-slate-800 text-xs font-semibold hover:bg-slate-50 cursor-pointer min-h-[40px]"
-                  >
-                    {activeRound.status === 'open' ? (
+          <div className="pt-3 border-t border-slate-100 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-wrap gap-2">
+                {activeRound.status !== 'closed' ? (
+                  <>
+                    {!votingStarted ? (
                       <>
-                        <Pause className="w-4 h-4" /> Pausar votación
+                        <button
+                          type="button"
+                          disabled={savingControl}
+                          onClick={() =>
+                            handleControlUpdate({ proposalsOpen: false, votingStarted: true })
+                          }
+                          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-800 text-white text-xs font-semibold hover:bg-blue-900 cursor-pointer disabled:opacity-50 min-h-[40px]"
+                        >
+                          <Play className="w-4 h-4" />
+                          {proposalsOpen && !activeRound.isTieBreaker
+                            ? 'Cerrar propuestas e iniciar votación'
+                            : 'Iniciar votación'}
+                        </button>
+                        {!activeRound.isTieBreaker && (
+                          <button
+                            type="button"
+                            disabled={savingControl}
+                            onClick={() =>
+                              handleControlUpdate({ proposalsOpen: !proposalsOpen })
+                            }
+                            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-300 bg-white text-slate-800 text-xs font-semibold hover:bg-slate-50 cursor-pointer disabled:opacity-50 min-h-[40px]"
+                          >
+                            {proposalsOpen ? (
+                              <>
+                                <Lock className="w-4 h-4" /> Cerrar propuestas (observación)
+                              </>
+                            ) : (
+                              <>
+                                <Unlock className="w-4 h-4" /> Reabrir propuestas
+                              </>
+                            )}
+                          </button>
+                        )}
                       </>
                     ) : (
-                      <>
-                        <Play className="w-4 h-4" /> Reanudar
-                      </>
+                      !activeRound.isTieBreaker && (
+                        <button
+                          type="button"
+                          disabled={savingControl}
+                          onClick={() =>
+                            handleControlUpdate({ proposalsOpen: !proposalsOpen })
+                          }
+                          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-300 bg-white text-slate-800 text-xs font-semibold hover:bg-slate-50 cursor-pointer disabled:opacity-50 min-h-[40px]"
+                        >
+                          {proposalsOpen ? (
+                            <>
+                              <Lock className="w-4 h-4" /> Cerrar propuestas
+                            </>
+                          ) : (
+                            <>
+                              <Unlock className="w-4 h-4" /> Reabrir propuestas
+                            </>
+                          )}
+                        </button>
+                      )
                     )}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      await syncRoundAndProjector({
-                        session,
-                        round: activeRound,
-                        candidates,
-                        ballots,
-                        receiptsCount,
-                        forceClose: true,
-                      });
-                      onGoToResults();
-                    }}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-900 text-white text-xs font-semibold hover:bg-slate-800 cursor-pointer min-h-[40px]"
-                  >
-                    <Lock className="w-4 h-4" /> Cerrar votación ahora
-                  </button>
-                </>
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => reopenRound(session, activeRound, candidates)}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-300 bg-white text-slate-800 text-xs font-semibold hover:bg-slate-50 cursor-pointer min-h-[40px]"
-                  >
-                    <RotateCcw className="w-4 h-4" /> Reabrir votación
-                  </button>
-                  <button
-                    type="button"
-                    onClick={onGoToResults}
-                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-800 text-white text-xs font-semibold hover:bg-blue-900 cursor-pointer min-h-[40px]"
-                  >
-                    Ver resultados
-                  </button>
-                </>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setRoundPauseState(session, activeRound, activeRound.status === 'open')
+                      }
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-300 bg-white text-slate-800 text-xs font-semibold hover:bg-slate-50 cursor-pointer min-h-[40px]"
+                    >
+                      {activeRound.status === 'open' ? (
+                        <>
+                          <Pause className="w-4 h-4" /> Pausar votación
+                        </>
+                      ) : (
+                        <>
+                          <Play className="w-4 h-4" /> Reanudar
+                        </>
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await syncRoundAndProjector({
+                          session,
+                          round: activeRound,
+                          candidates,
+                          ballots,
+                          receiptsCount,
+                          forceClose: true,
+                        });
+                        onGoToResults();
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-900 text-white text-xs font-semibold hover:bg-slate-800 cursor-pointer min-h-[40px]"
+                    >
+                      <Lock className="w-4 h-4" /> Cerrar votación ahora
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => reopenRound(session, activeRound, candidates)}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-300 bg-white text-slate-800 text-xs font-semibold hover:bg-slate-50 cursor-pointer min-h-[40px]"
+                    >
+                      <RotateCcw className="w-4 h-4" /> Reabrir votación
+                    </button>
+                    <button
+                      type="button"
+                      onClick={onGoToResults}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-800 text-white text-xs font-semibold hover:bg-blue-900 cursor-pointer min-h-[40px]"
+                    >
+                      Ver resultados
+                    </button>
+                  </>
+                )}
+              </div>
+              {!activeRound.pastorVoteAllowed && (
+                <span className="text-xs text-slate-500">
+                  Voto del pastor deshabilitado (comisión impar)
+                </span>
               )}
             </div>
-            {!activeRound.pastorVoteAllowed && (
-              <span className="text-xs text-slate-500">
-                Voto del pastor deshabilitado (comisión impar)
-              </span>
+
+            {activeRound.status !== 'closed' && (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void handleControlUpdate({
+                    observation: observationDraft.trim() ? observationDraft.trim() : null,
+                  });
+                }}
+                className="pt-2 border-t border-slate-100 space-y-2"
+              >
+                <label
+                  htmlFor="round-observation"
+                  className="text-xs font-semibold text-slate-700 flex items-center gap-1.5"
+                >
+                  <MessageSquareText className="w-3.5 h-3.5 text-blue-800" />
+                  Observación para la comisión (visible en Votar y Proyector)
+                </label>
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <input
+                    id="round-observation"
+                    type="text"
+                    maxLength={500}
+                    value={observationDraft}
+                    onChange={(e) => setObservationDraft(e.target.value)}
+                    placeholder="Ej. Evaluar disponibilidad y servicio previo antes de emitir el voto..."
+                    className="flex-1 px-3.5 py-2 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-700 min-h-[42px]"
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      type="submit"
+                      disabled={savingControl}
+                      className="px-4 py-2 rounded-xl bg-slate-900 text-white text-xs font-semibold hover:bg-slate-800 cursor-pointer disabled:opacity-50 min-h-[42px] whitespace-nowrap"
+                    >
+                      {savingControl ? 'Guardando...' : 'Guardar observación'}
+                    </button>
+                    {activeRound.observation && (
+                      <button
+                        type="button"
+                        disabled={savingControl}
+                        onClick={() => {
+                          setObservationDraft('');
+                          void handleControlUpdate({ observation: null });
+                        }}
+                        className="px-3.5 py-2 rounded-xl border border-slate-300 bg-white text-slate-700 text-xs font-semibold hover:bg-slate-50 cursor-pointer disabled:opacity-50 min-h-[42px]"
+                      >
+                        Quitar
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </form>
             )}
           </div>
         )}
       </div>
 
-      {/* Special Pastor Secret Vote Notice when enabled */}
-      {isAdmin && activeRound.pastorVoteAllowed && activeRound.status === 'open' && !hasVotedCurrentRound && (
-        <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4 flex items-center gap-3 text-sm text-blue-950">
-          <Shield className="w-5 h-5 text-blue-800 shrink-0" />
-          <p>
-            <strong>Opción especial de voto del pastor habilitada:</strong> Tu voto tiene el mismo
-            valor que el de los demás integrantes (1 voto ordinario) y es completamente secreto.
-          </p>
+      {/* Pastor Observation Banner (Visible to all members) */}
+      {activeRound.observation && activeRound.observation.trim() && (
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-start gap-3 text-sm text-amber-950">
+          <MessageSquareText className="w-5 h-5 text-amber-800 shrink-0 mt-0.5" />
+          <div>
+            <p className="font-bold text-xs uppercase tracking-wide text-amber-900">
+              Observación del pastor / comisión
+            </p>
+            <p className="mt-0.5 leading-relaxed">{activeRound.observation}</p>
+          </div>
         </div>
       )}
+
+      {/* Special Pastor Secret Vote Notice when enabled */}
+      {isAdmin &&
+        activeRound.pastorVoteAllowed &&
+        activeRound.status === 'open' &&
+        votingStarted &&
+        !hasVotedCurrentRound && (
+          <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4 flex items-center gap-3 text-sm text-blue-950">
+            <Shield className="w-5 h-5 text-blue-800 shrink-0" />
+            <p>
+              <strong>Opción especial de voto del pastor habilitada:</strong> Tu voto tiene el mismo
+              valor que el de los demás integrantes (1 voto ordinario) y es completamente secreto.
+            </p>
+          </div>
+        )}
 
       {/* Propose Candidate Box */}
       {activeRound.status === 'open' &&
         !activeRound.isTieBreaker &&
+        proposalsOpen &&
         (canCommitteeVote || isAdmin) && (
           <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -499,6 +692,14 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
           </div>
         )}
 
+        {activeRound.status === 'open' && !votingStarted && (
+          <div className="p-4 rounded-xl bg-blue-50 border border-blue-200 text-sm text-blue-950 font-medium">
+            {proposalsOpen
+              ? 'Fase de propuestas y observación: propongan y revisen los candidatos. El pastor cerrará las propuestas y dará inicio a la votación cuando corresponda.'
+              : 'Propuestas cerradas · Fase de observación previa al voto. La votación se habilitará cuando el pastor dé inicio.'}
+          </div>
+        )}
+
         {activeRound.status === 'paused' && (
           <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 text-sm text-amber-950 font-medium">
             La votación está pausada temporalmente por el pastor. Espera a que se reanude para
@@ -545,7 +746,10 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
             {candidates.map((cand) => {
               const isSelected = selectedIds.includes(cand.id);
               const disabled =
-                hasVotedCurrentRound || activeRound.status !== 'open' || !voterReceiptId;
+                hasVotedCurrentRound ||
+                activeRound.status !== 'open' ||
+                !votingStarted ||
+                !voterReceiptId;
 
               return (
                 <div
@@ -594,6 +798,7 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
         {voterReceiptId &&
           !hasVotedCurrentRound &&
           activeRound.status === 'open' &&
+          votingStarted &&
           candidates.length > 0 && (
             <div className="pt-3">
               <button

@@ -350,12 +350,16 @@ export default function App() {
     );
     const shouldAutoClose =
       activeRound.status === 'open' &&
+      activeRound.votingStarted !== false &&
       activeRound.expectedVotersCount > 0 &&
       receiptsCount >= activeRound.expectedVotersCount;
 
     const signature = [
       activeRound.id,
       activeRound.status,
+      activeRound.proposalsOpen ? '1' : '0',
+      activeRound.votingStarted === false ? '0' : '1',
+      activeRound.observation ?? '',
       activeRound.expectedVotersCount,
       receiptsCount,
       ballots.length,
