@@ -208,20 +208,20 @@ export const ResultsSection: React.FC<ResultsSectionProps> = ({
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-6 space-y-6 pb-24 sm:pb-10">
-      {/* PROYECTAR RESULTADOS BAR */}
-      <div className="no-print bg-white border border-slate-200 rounded-2xl p-5 sm:p-6 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-        <div className="space-y-1">
-          <h1 className="text-xl font-bold text-slate-900">
-            Proyección y Lista Final de Nombramientos
-          </h1>
-          <p className="text-sm text-slate-600">
-            Abre la pantalla independiente para el proyector y decide cuándo mostrar los resultados
-            a la comisión.
-          </p>
-        </div>
+      {/* PROYECTAR RESULTADOS BAR (Admin only) / Clean Header (Committee) */}
+      {isAdmin ? (
+        <div className="no-print bg-white border border-slate-200 rounded-2xl p-5 sm:p-6 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <h1 className="text-xl font-bold text-slate-900">
+              Proyección y Lista Final de Nombramientos
+            </h1>
+            <p className="text-sm text-slate-600">
+              Abre la pantalla independiente para el proyector y decide cuándo mostrar los
+              resultados a la comisión.
+            </p>
+          </div>
 
-        <div className="flex flex-wrap items-center gap-2.5">
-          {isAdmin && (
+          <div className="flex flex-wrap items-center gap-2.5">
             <button
               type="button"
               onClick={() =>
@@ -245,55 +245,68 @@ export const ResultsSection: React.FC<ResultsSectionProps> = ({
                 </>
               )}
             </button>
-          )}
 
-          <button
-            type="button"
-            onClick={async () => {
-              try {
-                if (navigator.clipboard && navigator.clipboard.writeText) {
-                  await navigator.clipboard.writeText(projectorUrl);
-                } else {
-                  throw new Error('Clipboard unavailable');
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  if (navigator.clipboard && navigator.clipboard.writeText) {
+                    await navigator.clipboard.writeText(projectorUrl);
+                  } else {
+                    throw new Error('Clipboard unavailable');
+                  }
+                } catch {
+                  const ta = document.createElement('textarea');
+                  ta.value = projectorUrl;
+                  ta.style.position = 'fixed';
+                  ta.style.opacity = '0';
+                  document.body.appendChild(ta);
+                  ta.focus();
+                  ta.select();
+                  document.execCommand('copy');
+                  document.body.removeChild(ta);
                 }
-              } catch {
-                const ta = document.createElement('textarea');
-                ta.value = projectorUrl;
-                ta.style.position = 'fixed';
-                ta.style.opacity = '0';
-                document.body.appendChild(ta);
-                ta.focus();
-                ta.select();
-                document.execCommand('copy');
-                document.body.removeChild(ta);
-              }
-              setCopiedProjector(true);
-              setTimeout(() => setCopiedProjector(false), 2200);
-            }}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-300 bg-white text-slate-800 text-sm font-semibold hover:bg-slate-50 cursor-pointer min-h-[44px]"
-          >
-            {copiedProjector ? (
-              <>
-                <Check className="w-4 h-4 text-emerald-700" /> Enlace copiado
-              </>
-            ) : (
-              <>
-                <Copy className="w-4 h-4" /> Copiar enlace proyector
-              </>
-            )}
-          </button>
+                setCopiedProjector(true);
+                setTimeout(() => setCopiedProjector(false), 2200);
+              }}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-300 bg-white text-slate-800 text-sm font-semibold hover:bg-slate-50 cursor-pointer min-h-[44px]"
+            >
+              {copiedProjector ? (
+                <>
+                  <Check className="w-4 h-4 text-emerald-700" /> Enlace copiado
+                </>
+              ) : (
+                <>
+                  <Copy className="w-4 h-4" /> Copiar enlace proyector
+                </>
+              )}
+            </button>
 
-          <a
-            href={projectorUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-800 text-white text-sm font-bold hover:bg-blue-900 transition-colors min-h-[44px] whitespace-nowrap"
-          >
-            <Monitor className="w-4 h-4" />
-            PROYECTAR RESULTADOS
-          </a>
+            <a
+              href={projectorUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-800 text-white text-sm font-bold hover:bg-blue-900 transition-colors min-h-[44px] whitespace-nowrap"
+            >
+              <Monitor className="w-4 h-4" />
+              PROYECTAR RESULTADOS
+            </a>
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="bg-white border border-slate-200 rounded-2xl p-5 sm:p-6">
+          <p className="text-xs font-medium text-slate-500">
+            {session.churchName} · Período {session.year}
+          </p>
+          <h1 className="text-xl font-bold text-slate-900 mt-0.5">
+            Resultados de la Votación
+          </h1>
+          <p className="text-sm text-slate-600 mt-1">
+            Consulta los resultados autorizados y la lista de nombramientos elegidos por la
+            comisión.
+          </p>
+        </div>
+      )}
 
       {/* ACTIVE / RECENT ROUND TALLY & TIE-BREAKER */}
       {activeRound && (
@@ -359,7 +372,7 @@ export const ResultsSection: React.FC<ResultsSectionProps> = ({
             )}
 
           {/* Tie Warning & Tie-Breaker Action */}
-          {hasTie && (
+          {hasTie && canMemberSeeResults && (
             <div className="bg-amber-50 border border-amber-300 rounded-2xl p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div className="flex items-start gap-3">
                 <AlertTriangle className="w-6 h-6 text-amber-700 shrink-0 mt-0.5" />
@@ -547,32 +560,34 @@ export const ResultsSection: React.FC<ResultsSectionProps> = ({
             </h2>
           </div>
 
-          <div className="no-print flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => exportFinalListPDF(session.churchName, session.year, departments)}
-              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 text-white text-sm font-semibold hover:bg-slate-800 cursor-pointer min-h-[44px]"
-            >
-              <Download className="w-4 h-4" />
-              Descargar PDF
-            </button>
-            <button
-              type="button"
-              onClick={() => exportFinalListExcel(session.churchName, session.year, departments)}
-              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-700 text-white text-sm font-semibold hover:bg-emerald-800 cursor-pointer min-h-[44px]"
-            >
-              <FileSpreadsheet className="w-4 h-4" />
-              Descargar Excel
-            </button>
-            <button
-              type="button"
-              onClick={() => window.print()}
-              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-300 bg-white text-slate-800 text-sm font-semibold hover:bg-slate-50 cursor-pointer min-h-[44px]"
-            >
-              <Printer className="w-4 h-4" />
-              Imprimir
-            </button>
-          </div>
+          {isAdmin && (
+            <div className="no-print flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => exportFinalListPDF(session.churchName, session.year, departments)}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 text-white text-sm font-semibold hover:bg-slate-800 cursor-pointer min-h-[44px]"
+              >
+                <Download className="w-4 h-4" />
+                Descargar PDF
+              </button>
+              <button
+                type="button"
+                onClick={() => exportFinalListExcel(session.churchName, session.year, departments)}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-700 text-white text-sm font-semibold hover:bg-emerald-800 cursor-pointer min-h-[44px]"
+              >
+                <FileSpreadsheet className="w-4 h-4" />
+                Descargar Excel
+              </button>
+              <button
+                type="button"
+                onClick={() => window.print()}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-300 bg-white text-slate-800 text-sm font-semibold hover:bg-slate-50 cursor-pointer min-h-[44px]"
+              >
+                <Printer className="w-4 h-4" />
+                Imprimir
+              </button>
+            </div>
+          )}
         </div>
 
         {groupedFinalList.length === 0 ? (

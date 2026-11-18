@@ -78,8 +78,7 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
     const q = proposalInput.trim().toLowerCase();
     return eligibleMembers
       .filter((m) => m.active && !existingNames.has(m.name.trim().toLowerCase()))
-      .filter((m) => (!q ? true : m.name.toLowerCase().includes(q)))
-      .slice(0, 10);
+      .filter((m) => (!q ? true : m.name.toLowerCase().includes(q)));
   }, [eligibleMembers, candidates, proposalInput]);
 
   if (!session) {
@@ -193,6 +192,10 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
       await proposeCandidate(session.id, activeRound.id, clean, token);
       setProposalInput('');
       setShowSuggestions(false);
+    } catch {
+      setVoteError(
+        'No se pudo agregar la propuesta. Verifica tu conexión o si la votación sigue abierta.'
+      );
     } finally {
       setProposing(false);
     }
@@ -391,11 +394,36 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
         !activeRound.isTieBreaker &&
         (canCommitteeVote || isAdmin) && (
           <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-3">
-            <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-              <UserPlus className="w-4 h-4 text-blue-800" />
-              Proponer candidato(a)
-            </h2>
-            <div className="relative flex flex-col sm:flex-row gap-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                  <UserPlus className="w-4 h-4 text-blue-800" />
+                  Proponer candidato(a)
+                </h2>
+                <p className="text-xs text-slate-600 mt-0.5">
+                  Elige un nombre de la lista de miembros aptos o escribe tu propuesta manualmente.
+                </p>
+              </div>
+              {eligibleMembers.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setShowSuggestions((prev) => !prev)}
+                  className="text-xs font-semibold text-blue-800 hover:underline cursor-pointer"
+                >
+                  {showSuggestions
+                    ? 'Ocultar lista'
+                    : `Ver lista de miembros (${activeEligible.length})`}
+                </button>
+              )}
+            </div>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                void handlePropose(proposalInput);
+              }}
+              className="relative flex flex-col sm:flex-row gap-2.5"
+            >
               <div className="relative flex-1">
                 <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
                 <input
@@ -411,7 +439,7 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
                   className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-700 min-h-[48px]"
                 />
                 {showSuggestions && activeEligible.length > 0 && (
-                  <div className="absolute left-0 right-0 top-full mt-1.5 z-20 bg-white border border-slate-200 rounded-xl shadow-lg max-h-56 overflow-y-auto divide-y divide-slate-100">
+                  <div className="absolute left-0 right-0 top-full mt-1.5 z-20 bg-white border border-slate-200 rounded-xl shadow-lg max-h-64 overflow-y-auto divide-y divide-slate-100">
                     {activeEligible.map((m) => (
                       <button
                         key={m.id}
@@ -427,23 +455,20 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
                 )}
               </div>
               <button
-                type="button"
+                type="submit"
                 disabled={proposing || !proposalInput.trim()}
-                onClick={() => handlePropose(proposalInput)}
                 className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-slate-900 text-white text-sm font-semibold hover:bg-slate-800 cursor-pointer disabled:opacity-50 min-h-[48px] whitespace-nowrap"
               >
                 <Plus className="w-4 h-4" />
-                Agregar candidato
+                {proposing ? 'Agregando...' : 'Agregar propuesta'}
               </button>
-            </div>
-            {showSuggestions && (
-              <button
-                type="button"
-                onClick={() => setShowSuggestions(false)}
-                className="text-xs text-slate-500 hover:text-slate-700 cursor-pointer"
-              >
-                Ocultar sugerencias
-              </button>
+            </form>
+            {showSuggestions && activeEligible.length === 0 && proposalInput.trim() && (
+              <p className="text-xs text-slate-600">
+                No coincide con un miembro pendiente de la lista. Presiona{' '}
+                <strong>Agregar propuesta</strong> para proponer a &ldquo;{proposalInput.trim()}
+                &rdquo;.
+              </p>
             )}
           </div>
         )}
@@ -484,14 +509,16 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
         {activeRound.status === 'closed' && (
           <div className="p-4 rounded-xl bg-slate-100 border border-slate-200 text-sm text-slate-800 flex items-center justify-between gap-3">
             <span className="font-semibold">
-              Esta ronda ha finalizado. Los resultados están listos para el pastor.
+              {isAdmin
+                ? 'Esta ronda ha finalizado. Los resultados están listos para el pastor.'
+                : 'Esta votación ha finalizado. Puedes consultar los resultados en la pestaña Resultados.'}
             </span>
             <button
               type="button"
               onClick={onGoToResults}
               className="px-4 py-2 rounded-xl bg-blue-800 text-white text-xs font-semibold cursor-pointer whitespace-nowrap"
             >
-              Ir a Resultados
+              Ver Resultados
             </button>
           </div>
         )}

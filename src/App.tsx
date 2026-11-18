@@ -175,6 +175,7 @@ export default function App() {
   }, [urlParams.sessionId, urlParams.token]);
 
   const isAdmin = Boolean(user && session && session.ownerId === user.uid);
+  const isCommitteeMode = Boolean((isTokenEntry || committeeMember) && !isAdmin);
 
   // Listen to session subcollections (eligibleMembers, departments, rounds)
   useEffect(() => {
@@ -429,11 +430,19 @@ export default function App() {
     setSelectedSessionId(id);
   };
 
-  const navItems: { id: AppSection; label: string; icon: React.ReactNode }[] = [
-    { id: 'admin', label: 'ADMINISTRAR', icon: <Settings className="w-5 h-5" /> },
-    { id: 'vote', label: 'VOTAR', icon: <CheckSquare className="w-5 h-5" /> },
-    { id: 'results', label: 'RESULTADOS', icon: <BarChart3 className="w-5 h-5" /> },
-  ];
+  const effectiveActiveSection: AppSection =
+    isCommitteeMode && activeSection === 'admin' ? 'vote' : activeSection;
+
+  const navItems: { id: AppSection; label: string; icon: React.ReactNode }[] = isCommitteeMode
+    ? [
+        { id: 'vote', label: 'VOTAR', icon: <CheckSquare className="w-5 h-5" /> },
+        { id: 'results', label: 'RESULTADOS', icon: <BarChart3 className="w-5 h-5" /> },
+      ]
+    : [
+        { id: 'admin', label: 'ADMINISTRAR', icon: <Settings className="w-5 h-5" /> },
+        { id: 'vote', label: 'VOTAR', icon: <CheckSquare className="w-5 h-5" /> },
+        { id: 'results', label: 'RESULTADOS', icon: <BarChart3 className="w-5 h-5" /> },
+      ];
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col">
@@ -443,7 +452,7 @@ export default function App() {
           {/* Zone 1: Brand wordmark */}
           <button
             type="button"
-            onClick={() => setActiveSection(isTokenEntry && !isAdmin ? 'vote' : 'admin')}
+            onClick={() => setActiveSection(isCommitteeMode ? 'vote' : 'admin')}
             className="flex items-center gap-2.5 text-left cursor-pointer whitespace-nowrap shrink-0"
           >
             <svg
@@ -465,10 +474,10 @@ export default function App() {
             </span>
           </button>
 
-          {/* Zone 2: Exactly 3 main sections */}
+          {/* Zone 2: Main sections */}
           <nav className="hidden sm:flex items-center gap-2">
             {navItems.map((item) => {
-              const isActive = activeSection === item.id;
+              const isActive = effectiveActiveSection === item.id;
               return (
                 <button
                   key={item.id}
@@ -488,7 +497,7 @@ export default function App() {
 
           {/* Zone 3: 1 primary contextual action */}
           <div className="flex items-center shrink-0">
-            {user ? (
+            {user && !isCommitteeMode ? (
               <button
                 type="button"
                 onClick={() => signOut(auth)}
@@ -497,9 +506,9 @@ export default function App() {
                 <LogOut className="w-4 h-4" />
                 Salir
               </button>
-            ) : committeeMember ? (
-              <span className="text-xs font-semibold text-blue-900 whitespace-nowrap truncate max-w-[160px]">
-                {committeeMember.name}
+            ) : isCommitteeMode ? (
+              <span className="text-xs font-semibold text-blue-900 whitespace-nowrap truncate max-w-[180px]">
+                {committeeMember ? committeeMember.name : 'Miembro de Comisión'}
               </span>
             ) : (
               <button
@@ -517,7 +526,7 @@ export default function App() {
 
       {/* Main Content */}
       <main className="flex-1">
-        {activeSection === 'admin' && (
+        {!isCommitteeMode && effectiveActiveSection === 'admin' && (
           <AdminSection
             user={user}
             onSignInGoogle={handleGoogleSignIn}
@@ -540,7 +549,7 @@ export default function App() {
           />
         )}
 
-        {activeSection === 'vote' && (
+        {effectiveActiveSection === 'vote' && (
           <VoteSection
             session={session}
             isAdmin={isAdmin}
@@ -556,7 +565,7 @@ export default function App() {
           />
         )}
 
-        {activeSection === 'results' && (
+        {effectiveActiveSection === 'results' && (
           <ResultsSection
             session={session}
             isAdmin={isAdmin}
@@ -571,10 +580,14 @@ export default function App() {
         )}
       </main>
 
-      {/* Mobile Bottom Navigation (3 Main Sections only, <= 15% mobile height) */}
-      <nav className="no-print sm:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 grid grid-cols-3 h-16">
+      {/* Mobile Bottom Navigation */}
+      <nav
+        className={`no-print sm:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 grid h-16 ${
+          isCommitteeMode ? 'grid-cols-2' : 'grid-cols-3'
+        }`}
+      >
         {navItems.map((item) => {
-          const isActive = activeSection === item.id;
+          const isActive = effectiveActiveSection === item.id;
           return (
             <button
               key={item.id}
