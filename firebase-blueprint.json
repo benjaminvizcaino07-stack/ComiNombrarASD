@@ -1,0 +1,491 @@
+{
+  "entities": {
+    "Session": {
+      "title": "Session",
+      "description": "Sesión o asamblea de comisión de nombramientos de una iglesia.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerEmail": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 200
+        },
+        "churchName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 140
+        },
+        "year": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 20
+        },
+        "projectorKey": {
+          "type": "string",
+          "minLength": 12,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "activeRoundId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "showResultsOnProjector": {
+          "type": "boolean"
+        },
+        "pastorVoteEnabledOverride": {
+          "type": "string",
+          "enum": ["auto", "enabled", "disabled"]
+        },
+        "enabledCommitteeCount": {
+          "type": "integer"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "ownerId",
+        "ownerEmail",
+        "churchName",
+        "year",
+        "projectorKey",
+        "showResultsOnProjector",
+        "pastorVoteEnabledOverride",
+        "enabledCommitteeCount",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "EligibleMember": {
+      "title": "EligibleMember",
+      "description": "Miembro de iglesia apto para ser propuesto y elegido.",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 140
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 240
+        },
+        "active": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["sessionId", "name", "active", "createdAt"]
+    },
+    "DepartmentPosition": {
+      "title": "DepartmentPosition",
+      "description": "Cargo y departamento de la iglesia a elegir.",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "department": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "roleTitle": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 140
+        },
+        "seats": {
+          "type": "integer"
+        },
+        "order": {
+          "type": "integer"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "voting", "paused", "tie", "completed"]
+        },
+        "activeRoundId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "electedNames": {
+          "type": "array"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "sessionId",
+        "department",
+        "roleTitle",
+        "seats",
+        "order",
+        "status",
+        "electedNames",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "CommitteeMember": {
+      "title": "CommitteeMember",
+      "description": "Integrante habilitado de la comisión de nombramientos identificado por su token.",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "roleLabel": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["sessionId", "name", "enabled", "createdAt"]
+    },
+    "Round": {
+      "title": "Round",
+      "description": "Ronda de votación (ordinaria o de desempate) para un cargo específico.",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "departmentId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "departmentName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "roleTitle": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 140
+        },
+        "seats": {
+          "type": "integer"
+        },
+        "isTieBreaker": {
+          "type": "boolean"
+        },
+        "roundNumber": {
+          "type": "integer"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["open", "paused", "closed"]
+        },
+        "pastorVoteAllowed": {
+          "type": "boolean"
+        },
+        "expectedVotersCount": {
+          "type": "integer"
+        },
+        "votesCastCount": {
+          "type": "integer"
+        },
+        "carryoverElectedNames": {
+          "type": "array"
+        },
+        "tiedCandidateIds": {
+          "type": "array"
+        },
+        "electedCandidateIds": {
+          "type": "array"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "sessionId",
+        "departmentId",
+        "departmentName",
+        "roleTitle",
+        "seats",
+        "isTieBreaker",
+        "roundNumber",
+        "status",
+        "pastorVoteAllowed",
+        "expectedVotersCount",
+        "votesCastCount",
+        "carryoverElectedNames",
+        "tiedCandidateIds",
+        "electedCandidateIds",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Candidate": {
+      "title": "Candidate",
+      "description": "Candidato propuesto dentro de una ronda de votación.",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "roundId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 140
+        },
+        "proposedByToken": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "voteCount": {
+          "type": "integer"
+        },
+        "elected": {
+          "type": "boolean"
+        },
+        "tied": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "sessionId",
+        "roundId",
+        "name",
+        "proposedByToken",
+        "voteCount",
+        "elected",
+        "tied",
+        "createdAt"
+      ]
+    },
+    "VoteReceipt": {
+      "title": "VoteReceipt",
+      "description": "Comprobante sin opción de candidato para evitar voto duplicado.",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "roundId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "castAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["sessionId", "roundId", "castAt"]
+    },
+    "SecretBallot": {
+      "title": "SecretBallot",
+      "description": "Boleta secreta y anónima sin identidad del votante.",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "roundId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "candidateIds": {
+          "type": "array"
+        },
+        "castAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["sessionId", "roundId", "candidateIds", "castAt"]
+    },
+    "ProjectorState": {
+      "title": "ProjectorState",
+      "description": "Estado público de proyección en segunda pantalla sin datos privados ni identidad de votantes.",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "churchName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 140
+        },
+        "year": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 20
+        },
+        "roundId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "departmentName": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "roleTitle": {
+          "type": "string",
+          "maxLength": 140
+        },
+        "seats": {
+          "type": "integer"
+        },
+        "isTieBreaker": {
+          "type": "boolean"
+        },
+        "roundStatus": {
+          "type": "string",
+          "enum": ["idle", "open", "paused", "closed", "tie"]
+        },
+        "showResults": {
+          "type": "boolean"
+        },
+        "votesCastCount": {
+          "type": "integer"
+        },
+        "expectedVotersCount": {
+          "type": "integer"
+        },
+        "candidates": {
+          "type": "array"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "sessionId",
+        "churchName",
+        "year",
+        "roundStatus",
+        "showResults",
+        "votesCastCount",
+        "expectedVotersCount",
+        "candidates",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/sessions/{sessionId}": {
+      "schema": { "$ref": "#/entities/Session" },
+      "description": "Configuración principal de cada comisión de nombramientos."
+    },
+    "/sessions/{sessionId}/eligibleMembers/{memberId}": {
+      "schema": { "$ref": "#/entities/EligibleMember" },
+      "description": "Lista de miembros de iglesia aptos para cargos."
+    },
+    "/sessions/{sessionId}/departments/{deptId}": {
+      "schema": { "$ref": "#/entities/DepartmentPosition" },
+      "description": "Cargos y departamentos configurados."
+    },
+    "/sessions/{sessionId}/committee/{token}": {
+      "schema": { "$ref": "#/entities/CommitteeMember" },
+      "description": "Integrantes de la comisión con enlace personal por token."
+    },
+    "/sessions/{sessionId}/rounds/{roundId}": {
+      "schema": { "$ref": "#/entities/Round" },
+      "description": "Rondas de votación por cargo."
+    },
+    "/sessions/{sessionId}/rounds/{roundId}/candidates/{candidateId}": {
+      "schema": { "$ref": "#/entities/Candidate" },
+      "description": "Candidatos propuestos en una ronda."
+    },
+    "/sessions/{sessionId}/rounds/{roundId}/receipts/{receiptId}": {
+      "schema": { "$ref": "#/entities/VoteReceipt" },
+      "description": "Registro único de voto emitido sin revelar elección."
+    },
+    "/sessions/{sessionId}/rounds/{roundId}/ballots/{ballotId}": {
+      "schema": { "$ref": "#/entities/SecretBallot" },
+      "description": "Boletas anónimas legibles solo por el administrador para conteo."
+    },
+    "/sessions/{sessionId}/projector/{projectorKey}": {
+      "schema": { "$ref": "#/entities/ProjectorState" },
+      "description": "Vista de resultados para segunda pantalla."
+    }
+  }
+}

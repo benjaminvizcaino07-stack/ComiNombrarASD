@@ -1,0 +1,399 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global safety net: deny everything by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Connection check path (authenticated users only)
+    match /test/connection {
+      allow get: if isSignedIn();
+    }
+
+    // --- Reusable Global Primitives ---
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isEmailVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isSessionAdmin(sessionId) {
+      return isEmailVerified()
+        && isValidId(sessionId)
+        && exists(/databases/$(database)/documents/sessions/$(sessionId))
+        && get(/databases/$(database)/documents/sessions/$(sessionId)).data.ownerId == request.auth.uid;
+    }
+
+    // --- Validation Blueprints ---
+    function isValidSession(data) {
+      return data.keys().hasAll([
+          'ownerId', 'ownerEmail', 'churchName', 'year', 'projectorKey',
+          'showResultsOnProjector', 'pastorVoteEnabledOverride',
+          'enabledCommitteeCount', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'ownerEmail', 'churchName', 'year', 'projectorKey',
+          'activeRoundId', 'showResultsOnProjector', 'pastorVoteEnabledOverride',
+          'enabledCommitteeCount', 'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.ownerId)
+        && data.ownerEmail is string && data.ownerEmail.size() >= 3 && data.ownerEmail.size() <= 200
+        && data.churchName is string && data.churchName.size() >= 1 && data.churchName.size() <= 140
+        && data.year is string && data.year.size() >= 1 && data.year.size() <= 20
+        && isValidId(data.projectorKey) && data.projectorKey.size() >= 12 && data.projectorKey.size() <= 64
+        && (!('activeRoundId' in data) || data.activeRoundId == null || isValidId(data.activeRoundId))
+        && data.showResultsOnProjector is bool
+        && data.pastorVoteEnabledOverride in ['auto', 'enabled', 'disabled']
+        && data.enabledCommitteeCount is int && data.enabledCommitteeCount >= 0 && data.enabledCommitteeCount <= 200
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidEligibleMember(data, sessionId) {
+      return data.keys().hasAll(['sessionId', 'name', 'active', 'createdAt'])
+        && data.keys().hasOnly(['sessionId', 'name', 'notes', 'active', 'createdAt'])
+        && data.sessionId == sessionId
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 140
+        && (!('notes' in data) || (data.notes is string && data.notes.size() <= 240))
+        && data.active is bool
+        && data.createdAt is timestamp;
+    }
+
+    function isValidDepartment(data, sessionId) {
+      return data.keys().hasAll([
+          'sessionId', 'department', 'roleTitle', 'seats', 'order',
+          'status', 'electedNames', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'sessionId', 'department', 'roleTitle', 'seats', 'order',
+          'status', 'activeRoundId', 'electedNames', 'createdAt', 'updatedAt'
+        ])
+        && data.sessionId == sessionId
+        && data.department is string && data.department.size() >= 1 && data.department.size() <= 120
+        && data.roleTitle is string && data.roleTitle.size() >= 1 && data.roleTitle.size() <= 140
+        && data.seats is int && data.seats >= 1 && data.seats <= 50
+        && data.order is int && data.order >= 0 && data.order <= 2000
+        && data.status in ['pending', 'voting', 'paused', 'tie', 'completed']
+        && (!('activeRoundId' in data) || data.activeRoundId == null || isValidId(data.activeRoundId))
+        && data.electedNames is list && data.electedNames.size() <= 50
+        && (data.electedNames.size() == 0 || data.electedNames[0] is string)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidCommitteeMember(data, sessionId) {
+      return data.keys().hasAll(['sessionId', 'name', 'enabled', 'createdAt'])
+        && data.keys().hasOnly(['sessionId', 'name', 'roleLabel', 'enabled', 'createdAt'])
+        && data.sessionId == sessionId
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 120
+        && (!('roleLabel' in data) || (data.roleLabel is string && data.roleLabel.size() <= 80))
+        && data.enabled is bool
+        && data.createdAt is timestamp;
+    }
+
+    function isValidRound(data, sessionId) {
+      return data.keys().hasAll([
+          'sessionId', 'departmentId', 'departmentName', 'roleTitle', 'seats',
+          'isTieBreaker', 'roundNumber', 'status', 'pastorVoteAllowed',
+          'expectedVotersCount', 'votesCastCount', 'carryoverElectedNames',
+          'tiedCandidateIds', 'electedCandidateIds', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'sessionId', 'departmentId', 'departmentName', 'roleTitle', 'seats',
+          'isTieBreaker', 'roundNumber', 'status', 'pastorVoteAllowed',
+          'expectedVotersCount', 'votesCastCount', 'carryoverElectedNames',
+          'tiedCandidateIds', 'electedCandidateIds', 'createdAt', 'updatedAt'
+        ])
+        && data.sessionId == sessionId
+        && isValidId(data.departmentId)
+        && data.departmentName is string && data.departmentName.size() >= 1 && data.departmentName.size() <= 120
+        && data.roleTitle is string && data.roleTitle.size() >= 1 && data.roleTitle.size() <= 140
+        && data.seats is int && data.seats >= 1 && data.seats <= 50
+        && data.isTieBreaker is bool
+        && data.roundNumber is int && data.roundNumber >= 1 && data.roundNumber <= 50
+        && data.status in ['open', 'paused', 'closed']
+        && data.pastorVoteAllowed is bool
+        && data.expectedVotersCount is int && data.expectedVotersCount >= 0 && data.expectedVotersCount <= 201
+        && data.votesCastCount is int && data.votesCastCount >= 0 && data.votesCastCount <= 201
+        && data.carryoverElectedNames is list && data.carryoverElectedNames.size() <= 50
+        && (data.carryoverElectedNames.size() == 0 || data.carryoverElectedNames[0] is string)
+        && data.tiedCandidateIds is list && data.tiedCandidateIds.size() <= 50
+        && (data.tiedCandidateIds.size() == 0 || data.tiedCandidateIds[0] is string)
+        && data.electedCandidateIds is list && data.electedCandidateIds.size() <= 50
+        && (data.electedCandidateIds.size() == 0 || data.electedCandidateIds[0] is string)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidCandidate(data, sessionId, roundId) {
+      return data.keys().hasAll([
+          'sessionId', 'roundId', 'name', 'proposedByToken',
+          'voteCount', 'elected', 'tied', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'sessionId', 'roundId', 'name', 'proposedByToken',
+          'voteCount', 'elected', 'tied', 'createdAt'
+        ])
+        && data.sessionId == sessionId
+        && data.roundId == roundId
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 140
+        && isValidId(data.proposedByToken)
+        && data.voteCount is int && data.voteCount >= 0 && data.voteCount <= 250
+        && data.elected is bool
+        && data.tied is bool
+        && data.createdAt is timestamp;
+    }
+
+    function isValidReceipt(data, sessionId, roundId) {
+      return data.keys().hasAll(['sessionId', 'roundId', 'castAt'])
+        && data.keys().hasOnly(['sessionId', 'roundId', 'castAt'])
+        && data.sessionId == sessionId
+        && data.roundId == roundId
+        && data.castAt is timestamp;
+    }
+
+    function isValidBallot(data, sessionId, roundId, maxSeats) {
+      return data.keys().hasAll(['sessionId', 'roundId', 'candidateIds', 'castAt'])
+        && data.keys().hasOnly(['sessionId', 'roundId', 'candidateIds', 'castAt'])
+        && data.sessionId == sessionId
+        && data.roundId == roundId
+        && data.candidateIds is list
+        && data.candidateIds.size() >= 1
+        && data.candidateIds.size() <= maxSeats
+        && data.candidateIds[0] is string
+        && data.castAt is timestamp;
+    }
+
+    function isValidProjectorState(data, sessionId) {
+      return data.keys().hasAll([
+          'sessionId', 'churchName', 'year', 'roundStatus', 'showResults',
+          'votesCastCount', 'expectedVotersCount', 'candidates', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'sessionId', 'churchName', 'year', 'roundId', 'departmentName',
+          'roleTitle', 'seats', 'isTieBreaker', 'roundStatus', 'showResults',
+          'votesCastCount', 'expectedVotersCount', 'candidates', 'updatedAt'
+        ])
+        && data.sessionId == sessionId
+        && data.churchName is string && data.churchName.size() >= 1 && data.churchName.size() <= 140
+        && data.year is string && data.year.size() >= 1 && data.year.size() <= 20
+        && (!('roundId' in data) || data.roundId == null || isValidId(data.roundId))
+        && (!('departmentName' in data) || (data.departmentName is string && data.departmentName.size() <= 120))
+        && (!('roleTitle' in data) || (data.roleTitle is string && data.roleTitle.size() <= 140))
+        && (!('seats' in data) || (data.seats is int && data.seats >= 1 && data.seats <= 50))
+        && (!('isTieBreaker' in data) || data.isTieBreaker is bool)
+        && data.roundStatus in ['idle', 'open', 'paused', 'closed', 'tie']
+        && data.showResults is bool
+        && data.votesCastCount is int && data.votesCastCount >= 0 && data.votesCastCount <= 250
+        && data.expectedVotersCount is int && data.expectedVotersCount >= 0 && data.expectedVotersCount <= 250
+        && data.candidates is list && data.candidates.size() <= 100
+        && data.updatedAt is timestamp;
+    }
+
+    // --- Collection Rules ---
+    match /sessions/{sessionId} {
+      allow get: if isValidId(sessionId) && (
+        (isEmailVerified() && existing().ownerId == request.auth.uid)
+        || existing().keys().hasAll(['ownerId'])
+      );
+      allow list: if isEmailVerified() && existing().ownerId == request.auth.uid;
+      allow create: if isEmailVerified()
+        && isValidId(sessionId)
+        && isValidSession(incoming())
+        && incoming().ownerId == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isEmailVerified()
+        && isValidId(sessionId)
+        && existing().ownerId == request.auth.uid
+        && isValidSession(incoming())
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time;
+      allow delete: if isEmailVerified()
+        && isValidId(sessionId)
+        && existing().ownerId == request.auth.uid;
+
+      match /eligibleMembers/{memberId} {
+        allow get: if isValidId(sessionId) && isValidId(memberId) && (isSessionAdmin(sessionId) || existing().sessionId == sessionId);
+        allow list: if isSessionAdmin(sessionId) || (isValidId(sessionId) && existing().sessionId == sessionId);
+        allow create: if isSessionAdmin(sessionId)
+          && isValidId(memberId)
+          && isValidEligibleMember(incoming(), sessionId)
+          && incoming().createdAt == request.time;
+        allow update: if isSessionAdmin(sessionId)
+          && isValidId(memberId)
+          && isValidEligibleMember(incoming(), sessionId)
+          && incoming().createdAt == existing().createdAt;
+        allow delete: if isSessionAdmin(sessionId) && isValidId(memberId);
+      }
+
+      match /departments/{deptId} {
+        allow get: if isValidId(sessionId) && isValidId(deptId) && (isSessionAdmin(sessionId) || existing().sessionId == sessionId);
+        allow list: if isSessionAdmin(sessionId) || (isValidId(sessionId) && existing().sessionId == sessionId);
+        allow create: if isSessionAdmin(sessionId)
+          && isValidId(deptId)
+          && isValidDepartment(incoming(), sessionId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isSessionAdmin(sessionId)
+          && isValidId(deptId)
+          && isValidDepartment(incoming(), sessionId)
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time;
+        allow delete: if isSessionAdmin(sessionId) && isValidId(deptId);
+      }
+
+      match /committee/{token} {
+        // Strict capability token get; no public listing to protect member tokens
+        allow get: if isValidId(sessionId) && isValidId(token) && (isSessionAdmin(sessionId) || existing().sessionId == sessionId);
+        allow list: if isSessionAdmin(sessionId);
+        allow create: if isSessionAdmin(sessionId)
+          && isValidId(token)
+          && isValidCommitteeMember(incoming(), sessionId)
+          && incoming().createdAt == request.time;
+        allow update: if isSessionAdmin(sessionId)
+          && isValidId(token)
+          && isValidCommitteeMember(incoming(), sessionId)
+          && incoming().createdAt == existing().createdAt;
+        allow delete: if isSessionAdmin(sessionId) && isValidId(token);
+      }
+
+      match /rounds/{roundId} {
+        allow get: if isValidId(sessionId) && isValidId(roundId) && (isSessionAdmin(sessionId) || existing().sessionId == sessionId);
+        allow list: if isSessionAdmin(sessionId) || (isValidId(sessionId) && existing().sessionId == sessionId);
+        allow create: if isSessionAdmin(sessionId)
+          && isValidId(roundId)
+          && isValidRound(incoming(), sessionId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isValidId(sessionId)
+          && isValidId(roundId)
+          && isValidRound(incoming(), sessionId)
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && (
+            isSessionAdmin(sessionId)
+            || (
+              existing().status == 'open'
+              && incoming().diff(existing()).affectedKeys().hasOnly(['votesCastCount', 'updatedAt'])
+              && incoming().votesCastCount == existing().votesCastCount + 1
+              && incoming().votesCastCount <= existing().expectedVotersCount
+            )
+          );
+        allow delete: if isSessionAdmin(sessionId) && isValidId(roundId);
+
+        match /candidates/{candidateId} {
+          allow get: if isValidId(sessionId) && isValidId(roundId) && isValidId(candidateId)
+            && (isSessionAdmin(sessionId) || (existing().sessionId == sessionId && existing().roundId == roundId));
+          allow list: if isSessionAdmin(sessionId) || (isValidId(sessionId) && isValidId(roundId) && existing().sessionId == sessionId && existing().roundId == roundId);
+          allow create: if isValidId(sessionId)
+            && isValidId(roundId)
+            && isValidId(candidateId)
+            && isValidCandidate(incoming(), sessionId, roundId)
+            && incoming().voteCount == 0
+            && incoming().elected == false
+            && incoming().tied == false
+            && incoming().createdAt == request.time
+            && (
+              isSessionAdmin(sessionId)
+              || (
+                get(/databases/$(database)/documents/sessions/$(sessionId)/rounds/$(roundId)).data.status == 'open'
+                && get(/databases/$(database)/documents/sessions/$(sessionId)/rounds/$(roundId)).data.isTieBreaker == false
+                && exists(/databases/$(database)/documents/sessions/$(sessionId)/committee/$(incoming().proposedByToken))
+                && get(/databases/$(database)/documents/sessions/$(sessionId)/committee/$(incoming().proposedByToken)).data.enabled == true
+              )
+            );
+          allow update: if isSessionAdmin(sessionId)
+            && isValidId(roundId)
+            && isValidId(candidateId)
+            && isValidCandidate(incoming(), sessionId, roundId)
+            && incoming().createdAt == existing().createdAt;
+          allow delete: if isSessionAdmin(sessionId) && isValidId(roundId) && isValidId(candidateId);
+        }
+
+        match /receipts/{receiptId} {
+          // Only exact get for own token or admin; list restricted to admin so tokens cannot be enumerated
+          allow get: if isValidId(sessionId) && isValidId(roundId) && isValidId(receiptId)
+            && (
+              isSessionAdmin(sessionId)
+              || exists(/databases/$(database)/documents/sessions/$(sessionId)/committee/$(receiptId))
+            );
+          allow list: if isSessionAdmin(sessionId);
+          allow create: if isValidId(sessionId)
+            && isValidId(roundId)
+            && isValidId(receiptId)
+            && isValidReceipt(incoming(), sessionId, roundId)
+            && incoming().castAt == request.time
+            && !exists(/databases/$(database)/documents/sessions/$(sessionId)/rounds/$(roundId)/receipts/$(receiptId))
+            && get(/databases/$(database)/documents/sessions/$(sessionId)/rounds/$(roundId)).data.status == 'open'
+            && (
+              (
+                isSessionAdmin(sessionId)
+                && receiptId == ('pastor_' + request.auth.uid)
+                && get(/databases/$(database)/documents/sessions/$(sessionId)/rounds/$(roundId)).data.pastorVoteAllowed == true
+              )
+              || (
+                exists(/databases/$(database)/documents/sessions/$(sessionId)/committee/$(receiptId))
+                && get(/databases/$(database)/documents/sessions/$(sessionId)/committee/$(receiptId)).data.enabled == true
+              )
+            );
+          allow update: if false;
+          allow delete: if isSessionAdmin(sessionId) && isValidId(roundId) && isValidId(receiptId);
+        }
+
+        match /ballots/{ballotId} {
+          // Only session admin can read ballots for tallying; ballots contain ZERO voter identity
+          allow get, list: if isSessionAdmin(sessionId);
+          allow create: if isValidId(sessionId)
+            && isValidId(roundId)
+            && isValidId(ballotId)
+            && get(/databases/$(database)/documents/sessions/$(sessionId)/rounds/$(roundId)).data.status == 'open'
+            && isValidBallot(incoming(), sessionId, roundId, get(/databases/$(database)/documents/sessions/$(sessionId)/rounds/$(roundId)).data.seats)
+            && incoming().castAt == request.time;
+          allow update: if false;
+          allow delete: if isSessionAdmin(sessionId) && isValidId(roundId) && isValidId(ballotId);
+        }
+      }
+
+      match /projector/{projectorKey} {
+        allow get: if isValidId(sessionId) && isValidId(projectorKey)
+          && (isSessionAdmin(sessionId) || existing().sessionId == sessionId);
+        allow list: if isSessionAdmin(sessionId);
+        allow create: if (
+            isSessionAdmin(sessionId)
+            || (
+              isEmailVerified()
+              && isValidId(sessionId)
+              && existsAfter(/databases/$(database)/documents/sessions/$(sessionId))
+              && getAfter(/databases/$(database)/documents/sessions/$(sessionId)).data.ownerId == request.auth.uid
+            )
+          )
+          && isValidId(projectorKey)
+          && isValidProjectorState(incoming(), sessionId)
+          && incoming().updatedAt == request.time;
+        allow update: if isSessionAdmin(sessionId)
+          && isValidId(projectorKey)
+          && isValidProjectorState(incoming(), sessionId)
+          && incoming().updatedAt == request.time;
+        allow delete: if isSessionAdmin(sessionId) && isValidId(projectorKey);
+      }
+    }
+  }
+}

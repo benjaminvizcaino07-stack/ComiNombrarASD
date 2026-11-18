@@ -1,0 +1,6 @@
+{
+  "name": "NOMBRAMIENTOS SDA",
+  "description": "Sistema de votación secreta en tiempo real, control pastoral y proyección de resultados para comisiones de nombramientos de la Iglesia Adventista del Séptimo Día.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
