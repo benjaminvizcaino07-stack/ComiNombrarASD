@@ -4,6 +4,10 @@ export type PastorVoteOverride = 'auto' | 'enabled' | 'disabled';
 
 export type DepartmentStatus = 'pending' | 'voting' | 'paused' | 'tie' | 'completed';
 
+export type DepartmentVotingMode = 'standard' | 'grouped';
+
+export type GroupedRoundStage = 'leader' | 'members_tiebreaker';
+
 export type RoundStatus = 'open' | 'paused' | 'closed';
 
 export interface SessionData {
@@ -35,10 +39,15 @@ export interface DepartmentPosition {
   sessionId: string;
   department: string;
   roleTitle: string;
+  votingMode?: DepartmentVotingMode;
+  leaderRoleTitle?: string;
+  membersRoleTitle?: string;
   seats: number;
   order: number;
   status: DepartmentStatus;
   activeRoundId?: string | null;
+  leaderElectedName?: string | null;
+  memberElectedNames?: string[];
   electedNames: string[];
   createdAt?: unknown;
   updatedAt?: unknown;
@@ -59,6 +68,12 @@ export interface RoundData {
   departmentId: string;
   departmentName: string;
   roleTitle: string;
+  votingMode?: DepartmentVotingMode;
+  groupedStage?: GroupedRoundStage;
+  leaderRoleTitle?: string;
+  membersRoleTitle?: string;
+  totalGroupSeats?: number;
+  carryoverLeaderName?: string | null;
   seats: number;
   isTieBreaker: boolean;
   roundNumber: number;
@@ -99,6 +114,7 @@ export interface ProjectorCandidate {
   voteCount: number | null;
   elected: boolean;
   tied: boolean;
+  electedRoleLabel?: string | null;
 }
 
 export interface ProjectorState {
@@ -108,6 +124,11 @@ export interface ProjectorState {
   roundId?: string | null;
   departmentName?: string;
   roleTitle?: string;
+  votingMode?: DepartmentVotingMode;
+  groupedStage?: GroupedRoundStage;
+  leaderRoleTitle?: string;
+  membersRoleTitle?: string;
+  totalGroupSeats?: number;
   seats?: number;
   isTieBreaker?: boolean;
   roundStatus: 'idle' | 'open' | 'paused' | 'closed' | 'tie';

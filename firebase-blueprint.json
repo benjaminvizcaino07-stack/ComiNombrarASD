@@ -119,6 +119,18 @@
           "minLength": 1,
           "maxLength": 140
         },
+        "votingMode": {
+          "type": "string",
+          "enum": ["standard", "grouped"]
+        },
+        "leaderRoleTitle": {
+          "type": "string",
+          "maxLength": 140
+        },
+        "membersRoleTitle": {
+          "type": "string",
+          "maxLength": 140
+        },
         "seats": {
           "type": "integer"
         },
@@ -132,6 +144,13 @@
         "activeRoundId": {
           "type": "string",
           "maxLength": 128
+        },
+        "leaderElectedName": {
+          "type": "string",
+          "maxLength": 140
+        },
+        "memberElectedNames": {
+          "type": "array"
         },
         "electedNames": {
           "type": "array"
@@ -212,6 +231,29 @@
         "roleTitle": {
           "type": "string",
           "minLength": 1,
+          "maxLength": 140
+        },
+        "votingMode": {
+          "type": "string",
+          "enum": ["standard", "grouped"]
+        },
+        "groupedStage": {
+          "type": "string",
+          "enum": ["leader", "members_tiebreaker"]
+        },
+        "leaderRoleTitle": {
+          "type": "string",
+          "maxLength": 140
+        },
+        "membersRoleTitle": {
+          "type": "string",
+          "maxLength": 140
+        },
+        "totalGroupSeats": {
+          "type": "integer"
+        },
+        "carryoverLeaderName": {
+          "type": "string",
           "maxLength": 140
         },
         "seats": {
@@ -409,6 +451,25 @@
         "roleTitle": {
           "type": "string",
           "maxLength": 140
+        },
+        "votingMode": {
+          "type": "string",
+          "enum": ["standard", "grouped"]
+        },
+        "groupedStage": {
+          "type": "string",
+          "enum": ["leader", "members_tiebreaker"]
+        },
+        "leaderRoleTitle": {
+          "type": "string",
+          "maxLength": 140
+        },
+        "membersRoleTitle": {
+          "type": "string",
+          "maxLength": 140
+        },
+        "totalGroupSeats": {
+          "type": "integer"
         },
         "seats": {
           "type": "integer"

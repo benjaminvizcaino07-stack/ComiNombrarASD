@@ -112,9 +112,25 @@ export const ProjectorView: React.FC<ProjectorViewProps> = ({ sessionId, project
               <div className="flex flex-wrap items-center gap-3 text-base text-slate-300">
                 <span className="font-semibold text-blue-300">{state.departmentName}</span>
                 <span aria-hidden="true">·</span>
-                <span className="font-mono tabular-nums">
-                  {state.seats ?? 1} {(state.seats ?? 1) === 1 ? 'puesto disponible' : 'puestos disponibles'}
-                </span>
+                {state.votingMode === 'grouped' ? (
+                  <>
+                    <span className="font-mono tabular-nums">
+                      Agrupado · {state.totalGroupSeats ?? state.seats ?? 2} integrantes totales
+                    </span>
+                    <span aria-hidden="true">·</span>
+                    <span className="text-slate-200">
+                      Votando:{' '}
+                      {state.groupedStage === 'members_tiebreaker'
+                        ? state.membersRoleTitle || 'Integrantes'
+                        : state.leaderRoleTitle || 'Cargo Principal'}
+                    </span>
+                  </>
+                ) : (
+                  <span className="font-mono tabular-nums">
+                    {state.seats ?? 1}{' '}
+                    {(state.seats ?? 1) === 1 ? 'puesto disponible' : 'puestos disponibles'}
+                  </span>
+                )}
                 {state.isTieBreaker && (
                   <>
                     <span aria-hidden="true">·</span>
@@ -208,7 +224,9 @@ export const ProjectorView: React.FC<ProjectorViewProps> = ({ sessionId, project
                           </span>
                           {cand.elected && (
                             <span className="text-base sm:text-lg font-bold text-emerald-300 shrink-0">
-                              · ELEGIDO(A)
+                              {cand.electedRoleLabel
+                                ? `· ELEGIDO(A): ${cand.electedRoleLabel}`
+                                : '· ELEGIDO(A)'}
                             </span>
                           )}
                           {cand.tied && (

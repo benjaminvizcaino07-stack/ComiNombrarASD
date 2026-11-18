@@ -24,7 +24,11 @@ import {
   Users,
   X,
 } from 'lucide-react';
-import { SDA_CHURCH_MANUAL_TEMPLATES, SdaManualRoleTemplate } from '../data/sdaManualPositions';
+import {
+  SDA_CHURCH_MANUAL_TEMPLATES,
+  SDA_GROUPED_DEPARTMENT_TEMPLATES,
+  SdaManualRoleTemplate,
+} from '../data/sdaManualPositions';
 import {
   addCommitteeMember,
   addDepartmentPosition,
@@ -48,6 +52,7 @@ import {
   CandidateData,
   CommitteeMember,
   DepartmentPosition,
+  DepartmentVotingMode,
   EligibleMember,
   PastorVoteOverride,
   RoundData,
@@ -117,24 +122,40 @@ export const AdminSection: React.FC<AdminSectionProps> = ({
 
   // Manual templates modal
   const [showManualModal, setShowManualModal] = useState(false);
+  const [templateTab, setTemplateTab] = useState<'standard' | 'grouped'>('standard');
   const [selectedTemplateIds, setSelectedTemplateIds] = useState<string[]>(
     SDA_CHURCH_MANUAL_TEMPLATES.map((t) => t.id)
+  );
+  const [selectedGroupedIds, setSelectedGroupedIds] = useState<string[]>(
+    SDA_GROUPED_DEPARTMENT_TEMPLATES.map((t) => t.id)
   );
   const [importingTemplates, setImportingTemplates] = useState(false);
 
   // Add/Edit position form
+  const [posVotingMode, setPosVotingMode] = useState<DepartmentVotingMode>('standard');
   const [deptName, setDeptName] = useState('');
   const [roleTitle, setRoleTitle] = useState('');
+  const [leaderRoleInput, setLeaderRoleInput] = useState('');
+  const [membersRoleInput, setMembersRoleInput] = useState('');
   const [seatsInput, setSeatsInput] = useState(1);
   const [editingDeptId, setEditingDeptId] = useState<string | null>(null);
+  const [editVotingMode, setEditVotingMode] = useState<DepartmentVotingMode>('standard');
   const [editDeptName, setEditDeptName] = useState('');
   const [editRoleTitle, setEditRoleTitle] = useState('');
+  const [editLeaderRoleTitle, setEditLeaderRoleTitle] = useState('');
+  const [editMembersRoleTitle, setEditMembersRoleTitle] = useState('');
   const [editSeats, setEditSeats] = useState(1);
 
   // Committee member form
   const [commName, setCommName] = useState('');
   const [commRole, setCommRole] = useState('Miembro de Comisión');
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
+  const [committeeError, setCommitteeError] = useState<string | null>(null);
+  const [lastGeneratedLink, setLastGeneratedLink] = useState<{
+    name: string;
+    link: string;
+    token: string;
+  } | null>(null);
 
   // Eligible members form
   const [memberName, setMemberName] = useState('');
@@ -152,6 +173,7 @@ export const AdminSection: React.FC<AdminSectionProps> = ({
 
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [statusNotice, setStatusNotice] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const enabledCount = useMemo(
     () => committee.filter((m) => m.enabled).length,
@@ -529,9 +551,74 @@ export const AdminSection: React.FC<AdminSectionProps> = ({
     );
   }
 
+  const extractUserErrorMessage = (err: unknown): string => {
+    const raw = err instanceof Error ? err.message : String(err);
+    let inner = raw;
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed.error === 'string') {
+        inner = parsed.error;
+      }
+    } catch {
+      // keep raw
+    }
+    if (inner.includes('Missing or insufficient permissions') || inner.includes('permission-denied')) {
+      return 'Permisos insuficientes en la base de datos. Cierra sesión y vuelve a ingresar como Pastor o Secretario.';
+    }
+    if (inner.includes('Quota exceeded')) {
+      return 'Se alcanzó el límite diario gratuito de operaciones en la base de datos.';
+    }
+    if (inner.includes('offline') || inner.includes('unavailable')) {
+      return 'Sin conexión con la nube. Verifica tu internet e intenta nuevamente.';
+    }
+    return inner || 'Ocurrió un error al guardar los datos. Intenta nuevamente.';
+  };
+
   const handleAddPosition = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!deptName.trim() || !roleTitle.trim()) return;
+    if (!deptName.trim()) return;
+
+    if (posVotingMode === 'grouped') {
+      const cleanLeader = leaderRoleInput.trim();
+      const cleanMembers = membersRoleInput.trim();
+      if (!cleanLeader || !cleanMembers) {
+        setActionError(
+          'En el modo agrupado debes indicar tanto el cargo principal como el cargo de los demás integrantes.'
+        );
+        return;
+      }
+      const totalSeats = Math.max(2, Math.min(50, seatsInput));
+      const composedTitle = `${cleanLeader} y ${cleanMembers}`;
+      setActionError(null);
+      setBusyAction('add-pos');
+      try {
+        await addDepartmentPosition(
+          session.id,
+          deptName.trim(),
+          composedTitle,
+          totalSeats,
+          departments.length,
+          {
+            votingMode: 'grouped',
+            leaderRoleTitle: cleanLeader,
+            membersRoleTitle: cleanMembers,
+          }
+        );
+        setDeptName('');
+        setLeaderRoleInput('');
+        setMembersRoleInput('');
+        setSeatsInput(5);
+        flashNotice('Departamento agrupado agregado correctamente.');
+      } catch (err) {
+        setActionError(extractUserErrorMessage(err));
+      } finally {
+        setBusyAction(null);
+      }
+      return;
+    }
+
+    if (!roleTitle.trim()) return;
+    setActionError(null);
     setBusyAction('add-pos');
     try {
       await addDepartmentPosition(
@@ -539,27 +626,38 @@ export const AdminSection: React.FC<AdminSectionProps> = ({
         deptName.trim(),
         roleTitle.trim(),
         seatsInput,
-        departments.length
+        departments.length,
+        { votingMode: 'standard' }
       );
       setDeptName('');
       setRoleTitle('');
       setSeatsInput(1);
       flashNotice('Cargo agregado correctamente.');
+    } catch (err) {
+      setActionError(extractUserErrorMessage(err));
     } finally {
       setBusyAction(null);
     }
   };
 
   const handleImportManualTemplates = async () => {
-    const chosen: SdaManualRoleTemplate[] = SDA_CHURCH_MANUAL_TEMPLATES.filter((t) =>
-      selectedTemplateIds.includes(t.id)
-    );
+    const source =
+      templateTab === 'grouped' ? SDA_GROUPED_DEPARTMENT_TEMPLATES : SDA_CHURCH_MANUAL_TEMPLATES;
+    const activeIds = templateTab === 'grouped' ? selectedGroupedIds : selectedTemplateIds;
+    const chosen: SdaManualRoleTemplate[] = source.filter((t) => activeIds.includes(t.id));
     if (chosen.length === 0) return;
+    setActionError(null);
     setImportingTemplates(true);
     try {
       await batchAddManualTemplates(session.id, chosen, departments.length);
       setShowManualModal(false);
-      flashNotice(`Se cargaron ${chosen.length} cargos del Manual de Iglesia.`);
+      flashNotice(
+        templateTab === 'grouped'
+          ? `Se cargaron ${chosen.length} departamentos agrupados del Manual de Iglesia.`
+          : `Se cargaron ${chosen.length} cargos del Manual de Iglesia.`
+      );
+    } catch (err) {
+      setActionError(extractUserErrorMessage(err));
     } finally {
       setImportingTemplates(false);
     }
@@ -571,6 +669,7 @@ export const AdminSection: React.FC<AdminSectionProps> = ({
       setSubTab('committee');
       return;
     }
+    setActionError(null);
     setBusyAction(`start-${dept.id}`);
     try {
       const roundsForDept = allRounds.filter((r) => r.departmentId === dept.id);
@@ -583,19 +682,66 @@ export const AdminSection: React.FC<AdminSectionProps> = ({
         isTieBreaker: false,
       });
       onNavigateToVote();
+    } catch (err) {
+      setActionError(extractUserErrorMessage(err));
     } finally {
       setBusyAction(null);
     }
   };
 
+  const getPersonalLink = (token: string) =>
+    `${window.location.origin}/?s=${encodeURIComponent(session.id)}&t=${encodeURIComponent(token)}`;
+
+  const copyPersonalLink = async (token: string) => {
+    const url = getPersonalLink(token);
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(url);
+      } else {
+        throw new Error('Clipboard API unavailable');
+      }
+    } catch {
+      const textarea = document.createElement('textarea');
+      textarea.value = url;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textarea);
+    }
+    setCopiedToken(token);
+    setTimeout(() => setCopiedToken((curr) => (curr === token ? null : curr)), 2200);
+  };
+
   const handleAddCommittee = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!commName.trim()) return;
+    setCommitteeError(null);
+    setActionError(null);
+    const cleanName = commName.trim();
+    if (!cleanName) {
+      setCommitteeError('Escribe el nombre del integrante de la comisión antes de generar su enlace.');
+      return;
+    }
     setBusyAction('add-comm');
     try {
-      await addCommitteeMember(session, commName.trim(), commRole.trim(), committee);
+      const token = await addCommitteeMember(
+        session,
+        cleanName,
+        commRole.trim(),
+        committee,
+        activeRound
+      );
+      const link = getPersonalLink(token);
+      setLastGeneratedLink({ name: cleanName, link, token });
       setCommName('');
-      flashNotice('Integrante agregado con su enlace personal.');
+      if (!commRole.trim()) {
+        setCommRole('Miembro de Comisión');
+      }
+      flashNotice(`Enlace personal generado para ${cleanName}.`);
+    } catch (err) {
+      setCommitteeError(extractUserErrorMessage(err));
     } finally {
       setBusyAction(null);
     }
@@ -635,6 +781,7 @@ export const AdminSection: React.FC<AdminSectionProps> = ({
       .filter((l) => l.length >= 2);
     if (lines.length === 0) return;
 
+    setActionError(null);
     setBusyAction('bulk-members');
     try {
       const existingNames = new Set(eligibleMembers.map((m) => m.name.toLowerCase()));
@@ -646,18 +793,11 @@ export const AdminSection: React.FC<AdminSectionProps> = ({
       setBulkText('');
       setShowBulkModal(false);
       flashNotice(`Se agregaron ${added} miembros aptos.`);
+    } catch (err) {
+      setActionError(extractUserErrorMessage(err));
     } finally {
       setBusyAction(null);
     }
-  };
-
-  const getPersonalLink = (token: string) =>
-    `${window.location.origin}/?s=${encodeURIComponent(session.id)}&t=${encodeURIComponent(token)}`;
-
-  const copyPersonalLink = async (token: string) => {
-    await navigator.clipboard.writeText(getPersonalLink(token));
-    setCopiedToken(token);
-    setTimeout(() => setCopiedToken((curr) => (curr === token ? null : curr)), 2200);
   };
 
   return (
@@ -670,6 +810,22 @@ export const AdminSection: React.FC<AdminSectionProps> = ({
             type="button"
             onClick={() => setStatusNotice(null)}
             className="text-slate-300 hover:text-white cursor-pointer"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {actionError && (
+        <div
+          role="alert"
+          className="bg-rose-50 border border-rose-200 text-rose-900 px-4 py-3 rounded-xl text-sm font-medium flex items-center justify-between"
+        >
+          <span>{actionError}</span>
+          <button
+            type="button"
+            onClick={() => setActionError(null)}
+            className="text-rose-700 hover:text-rose-900 cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
@@ -798,60 +954,174 @@ export const AdminSection: React.FC<AdminSectionProps> = ({
               </button>
             </div>
 
-            <form onSubmit={handleAddPosition} className="grid sm:grid-cols-12 gap-3 pt-2">
-              <div className="sm:col-span-4">
-                <label className="block text-xs font-medium text-slate-600 mb-1">
-                  Departamento
-                </label>
-                <input
-                  type="text"
-                  required
-                  maxLength={120}
-                  value={deptName}
-                  onChange={(e) => setDeptName(e.target.value)}
-                  placeholder="Ej. Escuela Sabática"
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-700"
-                />
+            <div className="pt-2 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <span className="text-xs font-semibold text-slate-600">
+                  Modo de votación para el nuevo registro:
+                </span>
+                <div className="inline-flex p-1 bg-slate-100 rounded-xl gap-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPosVotingMode('standard');
+                      if (seatsInput > 1 && !deptName) setSeatsInput(1);
+                    }}
+                    className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                      posVotingMode === 'standard'
+                        ? 'bg-white text-slate-900 shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    Cargo individual
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPosVotingMode('grouped');
+                      if (seatsInput < 2) setSeatsInput(5);
+                    }}
+                    className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                      posVotingMode === 'grouped'
+                        ? 'bg-white text-slate-900 shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    Agrupado por departamento (Principal + Integrantes)
+                  </button>
+                </div>
               </div>
-              <div className="sm:col-span-4">
-                <label className="block text-xs font-medium text-slate-600 mb-1">
-                  Cargo a elegir
-                </label>
-                <input
-                  type="text"
-                  required
-                  maxLength={140}
-                  value={roleTitle}
-                  onChange={(e) => setRoleTitle(e.target.value)}
-                  placeholder="Ej. Director(a) de Escuela Sabática"
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-700"
-                />
-              </div>
-              <div className="sm:col-span-2">
-                <label className="block text-xs font-medium text-slate-600 mb-1">
-                  Personas a elegir
-                </label>
-                <input
-                  type="number"
-                  min={1}
-                  max={50}
-                  required
-                  value={seatsInput}
-                  onChange={(e) => setSeatsInput(Math.max(1, Number(e.target.value) || 1))}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-mono tabular-nums focus:outline-none focus:ring-2 focus:ring-blue-700"
-                />
-              </div>
-              <div className="sm:col-span-2 flex items-end">
-                <button
-                  type="submit"
-                  disabled={busyAction === 'add-pos'}
-                  className="w-full inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-slate-900 text-white text-sm font-semibold hover:bg-slate-800 transition-colors cursor-pointer min-h-[44px]"
-                >
-                  <Plus className="w-4 h-4" />
-                  Agregar
-                </button>
-              </div>
-            </form>
+
+              {posVotingMode === 'grouped' && (
+                <div className="p-3.5 rounded-xl bg-blue-50/70 border border-blue-200 space-y-2.5">
+                  <p className="text-xs text-blue-950 leading-relaxed">
+                    <strong>Modo agrupado:</strong> La comisión propone los integrantes del
+                    departamento y vota por <strong>1 persona</strong> para el cargo principal (ej.{' '}
+                    <em>Primer Anciano</em>). El candidato más votado ocupa el cargo principal y los
+                    demás propuestos quedan elegidos automáticamente para el resto de puestos (ej.{' '}
+                    <em>Ancianos de Iglesia</em>).
+                  </p>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-xs font-medium text-blue-900 mr-1">
+                      Plantillas rápidas:
+                    </span>
+                    {SDA_GROUPED_DEPARTMENT_TEMPLATES.slice(0, 6).map((preset) => (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        onClick={() => {
+                          setDeptName(preset.department);
+                          setLeaderRoleInput(preset.leaderRoleTitle || '');
+                          setMembersRoleInput(preset.membersRoleTitle || '');
+                          setSeatsInput(preset.defaultSeats);
+                        }}
+                        className="px-2.5 py-1.5 rounded-lg bg-white border border-blue-200 text-xs font-semibold text-blue-900 hover:bg-blue-100 transition-colors cursor-pointer"
+                      >
+                        {preset.department} ({preset.defaultSeats})
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <form onSubmit={handleAddPosition} className="grid sm:grid-cols-12 gap-3">
+                <div className={posVotingMode === 'grouped' ? 'sm:col-span-3' : 'sm:col-span-4'}>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">
+                    Departamento
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    maxLength={120}
+                    value={deptName}
+                    onChange={(e) => setDeptName(e.target.value)}
+                    placeholder={
+                      posVotingMode === 'grouped' ? 'Ej. Ancianato' : 'Ej. Escuela Sabática'
+                    }
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-700"
+                  />
+                </div>
+
+                {posVotingMode === 'grouped' ? (
+                  <>
+                    <div className="sm:col-span-3">
+                      <label className="block text-xs font-medium text-slate-600 mb-1">
+                        Cargo principal (#1 votado)
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        maxLength={140}
+                        value={leaderRoleInput}
+                        onChange={(e) => setLeaderRoleInput(e.target.value)}
+                        placeholder="Ej. Primer Anciano"
+                        className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-700"
+                      />
+                    </div>
+                    <div className="sm:col-span-3">
+                      <label className="block text-xs font-medium text-slate-600 mb-1">
+                        Cargo demás propuestos
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        maxLength={140}
+                        value={membersRoleInput}
+                        onChange={(e) => setMembersRoleInput(e.target.value)}
+                        placeholder="Ej. Ancianos de Iglesia"
+                        className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-700"
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <div className="sm:col-span-4">
+                    <label className="block text-xs font-medium text-slate-600 mb-1">
+                      Cargo a elegir
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      maxLength={140}
+                      value={roleTitle}
+                      onChange={(e) => setRoleTitle(e.target.value)}
+                      placeholder="Ej. Director(a) de Escuela Sabática"
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-700"
+                    />
+                  </div>
+                )}
+
+                <div className={posVotingMode === 'grouped' ? 'sm:col-span-1' : 'sm:col-span-2'}>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">
+                    {posVotingMode === 'grouped' ? 'Total' : 'Personas a elegir'}
+                  </label>
+                  <input
+                    type="number"
+                    min={posVotingMode === 'grouped' ? 2 : 1}
+                    max={50}
+                    required
+                    value={seatsInput}
+                    onChange={(e) =>
+                      setSeatsInput(
+                        Math.max(
+                          posVotingMode === 'grouped' ? 2 : 1,
+                          Number(e.target.value) || (posVotingMode === 'grouped' ? 2 : 1)
+                        )
+                      )
+                    }
+                    className="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm font-mono tabular-nums focus:outline-none focus:ring-2 focus:ring-blue-700"
+                  />
+                </div>
+                <div className="sm:col-span-2 flex items-end">
+                  <button
+                    type="submit"
+                    disabled={busyAction === 'add-pos'}
+                    className="w-full inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-slate-900 text-white text-sm font-semibold hover:bg-slate-800 transition-colors cursor-pointer min-h-[44px]"
+                  >
+                    <Plus className="w-4 h-4" />
+                    Agregar
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
 
           <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
@@ -861,13 +1131,14 @@ export const AdminSection: React.FC<AdminSectionProps> = ({
                 <p className="font-semibold text-slate-900">No hay cargos cargados todavía</p>
                 <p className="text-sm text-slate-600 max-w-md mx-auto">
                   Usa el botón &ldquo;Referencia Manual de Iglesia ASD&rdquo; para cargar los
-                  departamentos oficiales en segundos o agrégalos manualmente arriba.
+                  departamentos oficiales (individuales o agrupados) o agrégalos manualmente arriba.
                 </p>
               </div>
             ) : (
               <div className="divide-y divide-slate-100">
                 {orderedDepartments.map((dept) => {
                   const isEditing = editingDeptId === dept.id;
+                  const isGroupedDept = dept.votingMode === 'grouped' && dept.seats >= 2;
                   const isThisActive =
                     activeRound && activeRound.departmentId === dept.id && activeRound.status !== 'closed';
 
@@ -877,52 +1148,124 @@ export const AdminSection: React.FC<AdminSectionProps> = ({
                       className="p-4 sm:px-6 flex flex-col lg:flex-row lg:items-center justify-between gap-4 hover:bg-slate-50/70 transition-colors"
                     >
                       {isEditing ? (
-                        <div className="flex-1 grid sm:grid-cols-12 gap-2.5">
-                          <input
-                            type="text"
-                            value={editDeptName}
-                            onChange={(e) => setEditDeptName(e.target.value)}
-                            className="sm:col-span-4 px-3 py-2 rounded-lg border border-slate-300 text-sm"
-                          />
-                          <input
-                            type="text"
-                            value={editRoleTitle}
-                            onChange={(e) => setEditRoleTitle(e.target.value)}
-                            className="sm:col-span-4 px-3 py-2 rounded-lg border border-slate-300 text-sm"
-                          />
-                          <input
-                            type="number"
-                            min={1}
-                            max={50}
-                            value={editSeats}
-                            onChange={(e) =>
-                              setEditSeats(Math.max(1, Number(e.target.value) || 1))
-                            }
-                            className="sm:col-span-2 px-3 py-2 rounded-lg border border-slate-300 text-sm font-mono tabular-nums"
-                          />
-                          <div className="sm:col-span-2 flex items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={async () => {
-                                await updateDepartmentPosition(session.id, dept.id, {
-                                  department: editDeptName,
-                                  roleTitle: editRoleTitle,
-                                  seats: editSeats,
-                                });
-                                setEditingDeptId(null);
-                                flashNotice('Cargo actualizado.');
-                              }}
-                              className="px-3 py-2 rounded-lg bg-blue-800 text-white text-xs font-semibold cursor-pointer"
-                            >
-                              Guardar
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setEditingDeptId(null)}
-                              className="px-3 py-2 rounded-lg border border-slate-300 text-slate-700 text-xs font-medium cursor-pointer"
-                            >
-                              Cancelar
-                            </button>
+                        <div className="flex-1 space-y-3">
+                          {dept.status === 'pending' && (
+                            <div className="inline-flex p-1 bg-slate-100 rounded-xl gap-1">
+                              <button
+                                type="button"
+                                onClick={() => setEditVotingMode('standard')}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer ${
+                                  editVotingMode === 'standard'
+                                    ? 'bg-white text-slate-900 shadow-xs'
+                                    : 'text-slate-600 hover:text-slate-900'
+                                }`}
+                              >
+                                Cargo individual
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditVotingMode('grouped');
+                                  if (editSeats < 2) setEditSeats(2);
+                                }}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer ${
+                                  editVotingMode === 'grouped'
+                                    ? 'bg-white text-slate-900 shadow-xs'
+                                    : 'text-slate-600 hover:text-slate-900'
+                                }`}
+                              >
+                                Agrupado por departamento
+                              </button>
+                            </div>
+                          )}
+
+                          <div className="grid sm:grid-cols-12 gap-2.5">
+                            <input
+                              type="text"
+                              value={editDeptName}
+                              onChange={(e) => setEditDeptName(e.target.value)}
+                              placeholder="Departamento"
+                              className="sm:col-span-3 px-3 py-2 rounded-lg border border-slate-300 text-sm"
+                            />
+                            {editVotingMode === 'grouped' ? (
+                              <>
+                                <input
+                                  type="text"
+                                  value={editLeaderRoleTitle}
+                                  onChange={(e) => setEditLeaderRoleTitle(e.target.value)}
+                                  placeholder="Cargo principal (#1)"
+                                  className="sm:col-span-3 px-3 py-2 rounded-lg border border-slate-300 text-sm"
+                                />
+                                <input
+                                  type="text"
+                                  value={editMembersRoleTitle}
+                                  onChange={(e) => setEditMembersRoleTitle(e.target.value)}
+                                  placeholder="Cargo demás integrantes"
+                                  className="sm:col-span-3 px-3 py-2 rounded-lg border border-slate-300 text-sm"
+                                />
+                              </>
+                            ) : (
+                              <input
+                                type="text"
+                                value={editRoleTitle}
+                                onChange={(e) => setEditRoleTitle(e.target.value)}
+                                placeholder="Cargo"
+                                className="sm:col-span-6 px-3 py-2 rounded-lg border border-slate-300 text-sm"
+                              />
+                            )}
+                            <input
+                              type="number"
+                              min={editVotingMode === 'grouped' ? 2 : 1}
+                              max={50}
+                              value={editSeats}
+                              onChange={(e) =>
+                                setEditSeats(
+                                  Math.max(
+                                    editVotingMode === 'grouped' ? 2 : 1,
+                                    Number(e.target.value) || (editVotingMode === 'grouped' ? 2 : 1)
+                                  )
+                                )
+                              }
+                              className="sm:col-span-1 px-2.5 py-2 rounded-lg border border-slate-300 text-sm font-mono tabular-nums"
+                            />
+                            <div className="sm:col-span-2 flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  if (editVotingMode === 'grouped') {
+                                    const cleanLeader = editLeaderRoleTitle.trim() || 'Cargo Principal';
+                                    const cleanMembers = editMembersRoleTitle.trim() || 'Integrantes';
+                                    await updateDepartmentPosition(session.id, dept.id, {
+                                      department: editDeptName,
+                                      roleTitle: `${cleanLeader} y ${cleanMembers}`,
+                                      votingMode: 'grouped',
+                                      leaderRoleTitle: cleanLeader,
+                                      membersRoleTitle: cleanMembers,
+                                      seats: Math.max(2, editSeats),
+                                    });
+                                  } else {
+                                    await updateDepartmentPosition(session.id, dept.id, {
+                                      department: editDeptName,
+                                      roleTitle: editRoleTitle,
+                                      votingMode: 'standard',
+                                      seats: editSeats,
+                                    });
+                                  }
+                                  setEditingDeptId(null);
+                                  flashNotice('Cargo actualizado.');
+                                }}
+                                className="px-3 py-2 rounded-lg bg-blue-800 text-white text-xs font-semibold cursor-pointer"
+                              >
+                                Guardar
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setEditingDeptId(null)}
+                                className="px-3 py-2 rounded-lg border border-slate-300 text-slate-700 text-xs font-medium cursor-pointer"
+                              >
+                                Cancelar
+                              </button>
+                            </div>
                           </div>
                         </div>
                       ) : (
@@ -934,6 +1277,16 @@ export const AdminSection: React.FC<AdminSectionProps> = ({
                               <span className="font-mono tabular-nums">
                                 {dept.seats} {dept.seats === 1 ? 'puesto' : 'puestos'}
                               </span>
+                              {isGroupedDept && (
+                                <>
+                                  <span aria-hidden="true">·</span>
+                                  <span className="font-semibold text-blue-800">
+                                    Agrupado: 1 {dept.leaderRoleTitle || 'Principal'} +{' '}
+                                    {Math.max(1, dept.seats - 1)}{' '}
+                                    {dept.membersRoleTitle || 'Integrantes'}
+                                  </span>
+                                </>
+                              )}
                               <span aria-hidden="true">·</span>
                               <span
                                 className={
@@ -960,10 +1313,29 @@ export const AdminSection: React.FC<AdminSectionProps> = ({
                             <h4 className="text-base font-bold text-slate-900 truncate">
                               {dept.roleTitle}
                             </h4>
-                            {dept.electedNames.length > 0 && (
-                              <p className="text-sm text-emerald-800 font-medium">
-                                Elegidos: {dept.electedNames.join(', ')}
-                              </p>
+                            {isGroupedDept &&
+                            (dept.leaderElectedName ||
+                              (dept.memberElectedNames && dept.memberElectedNames.length > 0)) ? (
+                              <div className="text-sm text-emerald-800 font-medium space-y-0.5">
+                                {dept.leaderElectedName && (
+                                  <p>
+                                    {dept.leaderRoleTitle || 'Cargo Principal'}:{' '}
+                                    <strong>{dept.leaderElectedName}</strong>
+                                  </p>
+                                )}
+                                {dept.memberElectedNames && dept.memberElectedNames.length > 0 && (
+                                  <p>
+                                    {dept.membersRoleTitle || 'Integrantes'}:{' '}
+                                    {dept.memberElectedNames.join(', ')}
+                                  </p>
+                                )}
+                              </div>
+                            ) : (
+                              dept.electedNames.length > 0 && (
+                                <p className="text-sm text-emerald-800 font-medium">
+                                  Elegidos: {dept.electedNames.join(', ')}
+                                </p>
+                              )
                             )}
                           </div>
 
@@ -976,7 +1348,11 @@ export const AdminSection: React.FC<AdminSectionProps> = ({
                                   aria-label="Reducir puestos"
                                   onClick={() =>
                                     updateDepartmentPosition(session.id, dept.id, {
-                                      seats: Math.max(1, dept.seats - 1),
+                                      votingMode: dept.votingMode ?? 'standard',
+                                      seats: Math.max(
+                                        isGroupedDept ? 2 : 1,
+                                        dept.seats - 1
+                                      ),
                                     })
                                   }
                                   className="px-3 py-2 text-slate-600 hover:text-slate-900 cursor-pointer min-h-[40px]"
@@ -991,6 +1367,7 @@ export const AdminSection: React.FC<AdminSectionProps> = ({
                                   aria-label="Aumentar puestos"
                                   onClick={() =>
                                     updateDepartmentPosition(session.id, dept.id, {
+                                      votingMode: dept.votingMode ?? 'standard',
                                       seats: Math.min(50, dept.seats + 1),
                                     })
                                   }
@@ -1056,8 +1433,13 @@ export const AdminSection: React.FC<AdminSectionProps> = ({
                               aria-label="Editar cargo"
                               onClick={() => {
                                 setEditingDeptId(dept.id);
+                                setEditVotingMode(
+                                  dept.votingMode === 'grouped' ? 'grouped' : 'standard'
+                                );
                                 setEditDeptName(dept.department);
                                 setEditRoleTitle(dept.roleTitle);
+                                setEditLeaderRoleTitle(dept.leaderRoleTitle || '');
+                                setEditMembersRoleTitle(dept.membersRoleTitle || '');
                                 setEditSeats(dept.seats);
                               }}
                               className="p-2.5 rounded-xl border border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-100 cursor-pointer min-h-[44px] min-w-[44px] flex items-center justify-center"
@@ -1149,6 +1531,23 @@ export const AdminSection: React.FC<AdminSectionProps> = ({
               Cada integrante recibe un enlace individual único para proponer y votar desde su
               celular sin contraseña ni cuenta.
             </p>
+
+            {committeeError && (
+              <div
+                role="alert"
+                className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-sm text-rose-800 flex items-center justify-between gap-2"
+              >
+                <span>{committeeError}</span>
+                <button
+                  type="button"
+                  onClick={() => setCommitteeError(null)}
+                  className="text-rose-700 hover:text-rose-900 cursor-pointer shrink-0"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+
             <form onSubmit={handleAddCommittee} className="grid sm:grid-cols-12 gap-3">
               <div className="sm:col-span-5">
                 <input
@@ -1156,7 +1555,10 @@ export const AdminSection: React.FC<AdminSectionProps> = ({
                   required
                   maxLength={120}
                   value={commName}
-                  onChange={(e) => setCommName(e.target.value)}
+                  onChange={(e) => {
+                    setCommName(e.target.value);
+                    if (committeeError) setCommitteeError(null);
+                  }}
                   placeholder="Nombre del integrante de comisión"
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-700"
                 />
@@ -1175,13 +1577,62 @@ export const AdminSection: React.FC<AdminSectionProps> = ({
                 <button
                   type="submit"
                   disabled={busyAction === 'add-comm'}
-                  className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-blue-800 text-white text-sm font-semibold hover:bg-blue-900 transition-colors cursor-pointer min-h-[44px]"
+                  className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-blue-800 text-white text-sm font-semibold hover:bg-blue-900 transition-colors cursor-pointer disabled:opacity-60 min-h-[44px]"
                 >
                   <UserPlus className="w-4 h-4" />
-                  Generar enlace
+                  {busyAction === 'add-comm' ? 'Generando enlace...' : 'Generar enlace'}
                 </button>
               </div>
             </form>
+
+            {lastGeneratedLink && (
+              <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm font-bold text-emerald-950">
+                    Enlace generado para {lastGeneratedLink.name}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setLastGeneratedLink(null)}
+                    className="text-emerald-800 hover:text-emerald-950 cursor-pointer"
+                    aria-label="Cerrar aviso"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+                <p className="text-xs font-mono text-emerald-900 break-all bg-white/80 px-3 py-2 rounded-lg border border-emerald-200">
+                  {lastGeneratedLink.link}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => copyPersonalLink(lastGeneratedLink.token)}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white border border-emerald-300 text-emerald-950 text-xs font-semibold hover:bg-emerald-100 cursor-pointer min-h-[40px]"
+                  >
+                    {copiedToken === lastGeneratedLink.token ? (
+                      <>
+                        <Check className="w-4 h-4 text-emerald-700" /> Enlace copiado
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-4 h-4" /> Copiar enlace
+                      </>
+                    )}
+                  </button>
+                  <a
+                    href={`https://wa.me/?text=${encodeURIComponent(
+                      `Hola ${lastGeneratedLink.name}, este es tu enlace personal y secreto para votar en la Comisión de Nombramientos de ${session.churchName}: ${lastGeneratedLink.link}`
+                    )}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-700 text-white text-xs font-semibold hover:bg-emerald-800 transition-colors min-h-[40px]"
+                  >
+                    <Share2 className="w-4 h-4" />
+                    Enviar por WhatsApp
+                  </a>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Committee List */}
@@ -1226,15 +1677,20 @@ export const AdminSection: React.FC<AdminSectionProps> = ({
                       <div className="flex flex-wrap items-center gap-2 shrink-0">
                         <button
                           type="button"
-                          onClick={() =>
-                            toggleCommitteeMember(
-                              session,
-                              member.id,
-                              !member.enabled,
-                              committee,
-                              activeRound
-                            )
-                          }
+                          onClick={async () => {
+                            setCommitteeError(null);
+                            try {
+                              await toggleCommitteeMember(
+                                session,
+                                member.id,
+                                !member.enabled,
+                                committee,
+                                activeRound
+                              );
+                            } catch (err) {
+                              setCommitteeError(extractUserErrorMessage(err));
+                            }
+                          }}
                           className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border text-xs font-semibold cursor-pointer min-h-[44px] transition-colors ${
                             member.enabled
                               ? 'bg-emerald-50 border-emerald-200 text-emerald-800 hover:bg-emerald-100'
@@ -1274,9 +1730,22 @@ export const AdminSection: React.FC<AdminSectionProps> = ({
                         <button
                           type="button"
                           aria-label="Eliminar integrante"
-                          onClick={() =>
-                            deleteCommitteeMember(session, member.id, committee, activeRound)
-                          }
+                          onClick={async () => {
+                            setCommitteeError(null);
+                            try {
+                              await deleteCommitteeMember(
+                                session,
+                                member.id,
+                                committee,
+                                activeRound
+                              );
+                              if (lastGeneratedLink?.token === member.id) {
+                                setLastGeneratedLink(null);
+                              }
+                            } catch (err) {
+                              setCommitteeError(extractUserErrorMessage(err));
+                            }
+                          }}
                           className="p-2.5 rounded-xl border border-slate-200 text-rose-600 hover:bg-rose-50 cursor-pointer min-h-[44px] min-w-[44px] flex items-center justify-center"
                         >
                           <Trash2 className="w-4 h-4" />
@@ -1343,11 +1812,14 @@ export const AdminSection: React.FC<AdminSectionProps> = ({
               onSubmit={async (e) => {
                 e.preventDefault();
                 if (!memberName.trim()) return;
+                setActionError(null);
                 setBusyAction('add-member');
                 try {
                   await addEligibleMember(session.id, memberName.trim(), memberNotes.trim());
                   setMemberName('');
                   setMemberNotes('');
+                } catch (err) {
+                  setActionError(extractUserErrorMessage(err));
                 } finally {
                   setBusyAction(null);
                 }
@@ -1573,14 +2045,14 @@ export const AdminSection: React.FC<AdminSectionProps> = ({
       {showManualModal && (
         <div className="fixed inset-0 z-50 bg-slate-950/50 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white border border-slate-200 rounded-2xl max-w-3xl w-full max-h-[85vh] flex flex-col overflow-hidden">
-            <div className="p-5 border-b border-slate-200 flex items-center justify-between">
+            <div className="p-5 border-b border-slate-200 flex items-center justify-between gap-3">
               <div>
                 <h3 className="text-lg font-bold text-slate-900">
                   Cargos del Manual de la Iglesia Adventista
                 </h3>
                 <p className="text-xs text-slate-600">
-                  Selecciona los cargos que deseas incorporar. Luego podrás editar puestos o
-                  eliminar cualquiera.
+                  Elige si deseas cargar cargos individuales o departamentos agrupados (cargo
+                  principal + integrantes).
                 </p>
               </div>
               <button
@@ -1592,84 +2064,138 @@ export const AdminSection: React.FC<AdminSectionProps> = ({
               </button>
             </div>
 
-            <div className="px-5 py-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between text-xs font-semibold">
-              <span className="text-slate-700">
-                {selectedTemplateIds.length} de {SDA_CHURCH_MANUAL_TEMPLATES.length} seleccionados
-              </span>
-              <div className="flex gap-3">
+            <div className="px-5 pt-3 pb-2 border-b border-slate-200 bg-white">
+              <div className="grid grid-cols-2 p-1 bg-slate-100 rounded-xl gap-1">
                 <button
                   type="button"
-                  onClick={() =>
-                    setSelectedTemplateIds(SDA_CHURCH_MANUAL_TEMPLATES.map((t) => t.id))
-                  }
-                  className="text-blue-800 hover:underline cursor-pointer"
+                  onClick={() => setTemplateTab('standard')}
+                  className={`py-2 px-3 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                    templateTab === 'standard'
+                      ? 'bg-white text-slate-900 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
                 >
-                  Seleccionar todos
+                  Cargos individuales ({SDA_CHURCH_MANUAL_TEMPLATES.length})
                 </button>
                 <button
                   type="button"
-                  onClick={() => setSelectedTemplateIds([])}
-                  className="text-slate-600 hover:underline cursor-pointer"
+                  onClick={() => setTemplateTab('grouped')}
+                  className={`py-2 px-3 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                    templateTab === 'grouped'
+                      ? 'bg-white text-slate-900 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
                 >
-                  Limpiar selección
+                  Agrupados por departamento ({SDA_GROUPED_DEPARTMENT_TEMPLATES.length})
                 </button>
               </div>
             </div>
 
-            <div className="p-5 overflow-y-auto divide-y divide-slate-100">
-              {SDA_CHURCH_MANUAL_TEMPLATES.map((tpl) => {
-                const checked = selectedTemplateIds.includes(tpl.id);
-                return (
-                  <label
-                    key={tpl.id}
-                    className="py-3 flex items-start gap-3 cursor-pointer hover:bg-slate-50 px-2 rounded-lg"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() =>
-                        setSelectedTemplateIds((prev) =>
-                          prev.includes(tpl.id)
-                            ? prev.filter((id) => id !== tpl.id)
-                            : [...prev, tpl.id]
-                        )
-                      }
-                      className="mt-1 w-4 h-4 accent-blue-800"
-                    />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-bold text-sm text-slate-900">{tpl.roleTitle}</span>
-                        <span className="text-xs font-mono text-slate-500 shrink-0">
-                          {tpl.defaultSeats} {tpl.defaultSeats === 1 ? 'puesto' : 'puestos'}
-                        </span>
-                      </div>
-                      <p className="text-xs text-blue-800 font-medium">{tpl.department}</p>
-                      <p className="text-xs text-slate-600 mt-0.5">{tpl.description}</p>
-                    </div>
-                  </label>
-                );
-              })}
-            </div>
+            {(() => {
+              const activeList =
+                templateTab === 'grouped'
+                  ? SDA_GROUPED_DEPARTMENT_TEMPLATES
+                  : SDA_CHURCH_MANUAL_TEMPLATES;
+              const activeSelected =
+                templateTab === 'grouped' ? selectedGroupedIds : selectedTemplateIds;
+              const setActiveSelected =
+                templateTab === 'grouped' ? setSelectedGroupedIds : setSelectedTemplateIds;
 
-            <div className="p-4 border-t border-slate-200 flex items-center justify-end gap-3 bg-slate-50">
-              <button
-                type="button"
-                onClick={() => setShowManualModal(false)}
-                className="px-4 py-2.5 rounded-xl border border-slate-300 bg-white text-slate-700 text-sm font-semibold cursor-pointer"
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                disabled={importingTemplates || selectedTemplateIds.length === 0}
-                onClick={handleImportManualTemplates}
-                className="px-5 py-2.5 rounded-xl bg-blue-800 text-white text-sm font-semibold hover:bg-blue-900 cursor-pointer disabled:opacity-50"
-              >
-                {importingTemplates
-                  ? 'Cargando cargos...'
-                  : `Cargar ${selectedTemplateIds.length} cargos`}
-              </button>
-            </div>
+              return (
+                <>
+                  <div className="px-5 py-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between text-xs font-semibold">
+                    <span className="text-slate-700">
+                      {activeSelected.length} de {activeList.length} seleccionados
+                    </span>
+                    <div className="flex gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setActiveSelected(activeList.map((t) => t.id))}
+                        className="text-blue-800 hover:underline cursor-pointer"
+                      >
+                        Seleccionar todos
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setActiveSelected([])}
+                        className="text-slate-600 hover:underline cursor-pointer"
+                      >
+                        Limpiar selección
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="p-5 overflow-y-auto divide-y divide-slate-100">
+                    {activeList.map((tpl) => {
+                      const checked = activeSelected.includes(tpl.id);
+                      return (
+                        <label
+                          key={tpl.id}
+                          className="py-3 flex items-start gap-3 cursor-pointer hover:bg-slate-50 px-2 rounded-lg"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() =>
+                              setActiveSelected((prev) =>
+                                prev.includes(tpl.id)
+                                  ? prev.filter((id) => id !== tpl.id)
+                                  : [...prev, tpl.id]
+                              )
+                            }
+                            className="mt-1 w-4 h-4 accent-blue-800"
+                          />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-bold text-sm text-slate-900">
+                                {tpl.roleTitle}
+                              </span>
+                              <span className="text-xs font-mono text-slate-500 shrink-0 tabular-nums">
+                                {tpl.votingMode === 'grouped'
+                                  ? `1 + ${Math.max(1, tpl.defaultSeats - 1)} (${tpl.defaultSeats} total)`
+                                  : `${tpl.defaultSeats} ${
+                                      tpl.defaultSeats === 1 ? 'puesto' : 'puestos'
+                                    }`}
+                              </span>
+                            </div>
+                            <p className="text-xs text-blue-800 font-medium">
+                              {tpl.department}
+                              {tpl.votingMode === 'grouped' &&
+                                tpl.leaderRoleTitle &&
+                                tpl.membersRoleTitle &&
+                                ` · Vota: ${tpl.leaderRoleTitle} · Demás: ${tpl.membersRoleTitle}`}
+                            </p>
+                            <p className="text-xs text-slate-600 mt-0.5">{tpl.description}</p>
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
+
+                  <div className="p-4 border-t border-slate-200 flex items-center justify-end gap-3 bg-slate-50">
+                    <button
+                      type="button"
+                      onClick={() => setShowManualModal(false)}
+                      className="px-4 py-2.5 rounded-xl border border-slate-300 bg-white text-slate-700 text-sm font-semibold cursor-pointer"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="button"
+                      disabled={importingTemplates || activeSelected.length === 0}
+                      onClick={handleImportManualTemplates}
+                      className="px-5 py-2.5 rounded-xl bg-blue-800 text-white text-sm font-semibold hover:bg-blue-900 cursor-pointer disabled:opacity-50"
+                    >
+                      {importingTemplates
+                        ? 'Cargando...'
+                        : templateTab === 'grouped'
+                          ? `Cargar ${activeSelected.length} agrupados`
+                          : `Cargar ${activeSelected.length} cargos`}
+                    </button>
+                  </div>
+                </>
+              );
+            })()}
           </div>
         </div>
       )}

@@ -143,6 +143,13 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
       ? Math.min(100, Math.round((displayedVotesCast / activeRound.expectedVotersCount) * 100))
       : 0;
 
+  const isGroupedRound = activeRound.votingMode === 'grouped';
+  const isMembersTieBreaker =
+    isGroupedRound && activeRound.groupedStage === 'members_tiebreaker';
+  const totalGroupSeats = activeRound.totalGroupSeats ?? activeRound.seats;
+  const leaderTitle = activeRound.leaderRoleTitle || 'Cargo Principal';
+  const membersTitle = activeRound.membersRoleTitle || 'Integrantes';
+
   const toggleSelection = (candidateId: string) => {
     if (hasVotedCurrentRound || activeRound.status !== 'open' || !voterReceiptId) return;
     setVoteError(null);
@@ -217,10 +224,16 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
           <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
             <span className="font-semibold text-blue-900">{activeRound.departmentName}</span>
             <span aria-hidden="true">·</span>
-            <span>
-              Elegir <strong className="font-mono">{activeRound.seats}</strong>{' '}
-              {activeRound.seats === 1 ? 'persona' : 'personas'}
-            </span>
+            {isGroupedRound ? (
+              <span className="font-mono tabular-nums">
+                Agrupado · {totalGroupSeats} integrantes en total
+              </span>
+            ) : (
+              <span>
+                Elegir <strong className="font-mono">{activeRound.seats}</strong>{' '}
+                {activeRound.seats === 1 ? 'persona' : 'personas'}
+              </span>
+            )}
             {activeRound.isTieBreaker && (
               <>
                 <span aria-hidden="true">·</span>
@@ -240,8 +253,36 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
         </div>
 
         <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 text-balance">
-          {activeRound.roleTitle}
+          {isGroupedRound
+            ? isMembersTieBreaker
+              ? `Desempate: ${membersTitle}`
+              : `Elegir ${leaderTitle}`
+            : activeRound.roleTitle}
         </h1>
+
+        {isGroupedRound && (
+          <div className="p-3.5 rounded-xl bg-blue-50/70 border border-blue-200 text-xs sm:text-sm text-blue-950 leading-relaxed">
+            {isMembersTieBreaker ? (
+              <p>
+                <strong>{activeRound.carryoverLeaderName || leaderTitle}</strong> ya fue elegido(a)
+                para <strong>{leaderTitle}</strong>. Selecciona hasta{' '}
+                <strong>{activeRound.seats}</strong>{' '}
+                {activeRound.seats === 1 ? 'candidato' : 'candidatos'} para completar{' '}
+                <strong>{membersTitle}</strong>.
+              </p>
+            ) : (
+              <p>
+                Propongan los nombres para <strong>{activeRound.departmentName}</strong> (
+                <span className="font-mono tabular-nums">{totalGroupSeats}</span> puestos totales).
+                Cada integrante vota por <strong>1 persona</strong> para{' '}
+                <strong>{leaderTitle}</strong>; los demás propuestos quedarán elegidos
+                automáticamente como <strong>{membersTitle}</strong> (hasta{' '}
+                <span className="font-mono tabular-nums">{Math.max(1, totalGroupSeats - 1)}</span>{' '}
+                puestos).
+              </p>
+            )}
+          </div>
+        )}
 
         {/* Participation Counter */}
         <div className="space-y-2 pt-1">
@@ -415,9 +456,11 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
               Candidatos Propuestos ({candidates.length})
             </h2>
             <p className="text-xs text-slate-600">
-              {activeRound.seats === 1
-                ? 'Selecciona 1 candidato para emitir tu voto secreto.'
-                : `Puedes seleccionar hasta ${activeRound.seats} candidatos (${selectedIds.length} seleccionados).`}
+              {isGroupedRound && !isMembersTieBreaker
+                ? `Selecciona 1 candidato para ${leaderTitle} (voto secreto).`
+                : activeRound.seats === 1
+                  ? 'Selecciona 1 candidato para emitir tu voto secreto.'
+                  : `Puedes seleccionar hasta ${activeRound.seats} candidatos (${selectedIds.length} seleccionados).`}
             </p>
           </div>
           <span className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-500">

@@ -48,11 +48,62 @@ export async function parseMembersExcel(file: File): Promise<ParsedMemberRow[]> 
   return parsed;
 }
 
+export interface ReportRoleRow {
+  id: string;
+  roleTitle: string;
+  electedNames: string[];
+  seats: number;
+  status: DepartmentPosition['status'];
+}
+
 export interface DepartmentSummaryGroup {
   department: string;
   positions: DepartmentPosition[];
+  rows: ReportRoleRow[];
   totalAssigned: number;
   totalSeats: number;
+}
+
+export function expandPositionForReport(pos: DepartmentPosition): ReportRoleRow[] {
+  if (pos.votingMode === 'grouped' && pos.seats >= 2) {
+    const leaderTitle = pos.leaderRoleTitle?.trim() || 'Cargo Principal';
+    const membersTitle = pos.membersRoleTitle?.trim() || 'Integrantes';
+    const leaderNames = pos.leaderElectedName
+      ? [pos.leaderElectedName]
+      : pos.electedNames.length > 0
+        ? [pos.electedNames[0]]
+        : [];
+    const memberNames = Array.isArray(pos.memberElectedNames)
+      ? pos.memberElectedNames
+      : pos.electedNames.slice(1);
+
+    return [
+      {
+        id: `${pos.id}_leader`,
+        roleTitle: leaderTitle,
+        electedNames: leaderNames,
+        seats: 1,
+        status: pos.status,
+      },
+      {
+        id: `${pos.id}_members`,
+        roleTitle: membersTitle,
+        electedNames: memberNames,
+        seats: Math.max(1, pos.seats - 1),
+        status: pos.status,
+      },
+    ];
+  }
+
+  return [
+    {
+      id: pos.id,
+      roleTitle: pos.roleTitle,
+      electedNames: pos.electedNames,
+      seats: pos.seats,
+      status: pos.status,
+    },
+  ];
 }
 
 export function groupDepartmentsForReport(
@@ -71,6 +122,7 @@ export function groupDepartmentsForReport(
   return Array.from(map.entries()).map(([department, positions]) => ({
     department,
     positions,
+    rows: positions.flatMap(expandPositionForReport),
     totalAssigned: positions.reduce((acc, p) => acc + p.electedNames.length, 0),
     totalSeats: positions.reduce((acc, p) => acc + p.seats, 0),
   }));
@@ -85,20 +137,20 @@ export function exportFinalListExcel(
   const rows: Record<string, string | number>[] = [];
 
   for (const group of groups) {
-    for (const pos of group.positions) {
+    for (const row of group.rows) {
       rows.push({
         Departamento: group.department,
-        Cargo: pos.roleTitle,
+        Cargo: row.roleTitle,
         'Personas Elegidas':
-          pos.electedNames.length > 0 ? pos.electedNames.join(', ') : 'Pendiente',
-        'Integrantes Asignados': pos.electedNames.length,
-        'Puestos Requeridos': pos.seats,
+          row.electedNames.length > 0 ? row.electedNames.join(', ') : 'Pendiente',
+        'Integrantes Asignados': row.electedNames.length,
+        'Puestos Requeridos': row.seats,
         Estado:
-          pos.status === 'completed'
+          row.status === 'completed'
             ? 'Completado'
-            : pos.status === 'tie'
+            : row.status === 'tie'
               ? 'Empate pendiente'
-              : pos.status === 'voting'
+              : row.status === 'voting'
                 ? 'En votación'
                 : 'Pendiente',
       });
@@ -107,7 +159,7 @@ export function exportFinalListExcel(
 
   const summaryRows = groups.map((g) => ({
     Departamento: g.department,
-    'Cargos en el Departamento': g.positions.length,
+    'Cargos en el Departamento': g.rows.length,
     'Total Integrantes Asignados': g.totalAssigned,
     'Total Puestos Configurados': g.totalSeats,
   }));
@@ -159,12 +211,12 @@ export function exportFinalListPDF(
 
   const tableBody: (string | number)[][] = [];
   for (const group of groups) {
-    for (const pos of group.positions) {
+    for (const row of group.rows) {
       tableBody.push([
         group.department,
-        pos.roleTitle,
-        pos.electedNames.length > 0 ? pos.electedNames.join('\n') : 'Sin asignar',
-        `${pos.electedNames.length} / ${pos.seats}`,
+        row.roleTitle,
+        row.electedNames.length > 0 ? row.electedNames.join('\n') : 'Sin asignar',
+        `${row.electedNames.length} / ${row.seats}`,
       ]);
     }
   }

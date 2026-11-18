@@ -14,6 +14,8 @@ import {
   CandidateData,
   CommitteeMember,
   DepartmentPosition,
+  DepartmentVotingMode,
+  GroupedRoundStage,
   PastorVoteOverride,
   ProjectorCandidate,
   RoundData,
@@ -21,7 +23,11 @@ import {
   SessionData,
 } from '../types';
 import { generateSecureId } from '../utils/id';
-import { computePastorVoteAllowed, evaluateRoundTallies } from '../utils/tally';
+import {
+  computePastorVoteAllowed,
+  evaluateGroupedRoundTallies,
+  evaluateRoundTallies,
+} from '../utils/tally';
 
 function clampString(value: string, max: number): string {
   return value.trim().slice(0, max);
@@ -190,23 +196,45 @@ export async function addDepartmentPosition(
   department: string,
   roleTitle: string,
   seats: number,
-  order: number
+  order: number,
+  options?: {
+    votingMode?: DepartmentVotingMode;
+    leaderRoleTitle?: string;
+    membersRoleTitle?: string;
+  }
 ): Promise<void> {
   const deptId = `d_${generateSecureId(16)}`;
   const path = `sessions/${sessionId}/departments/${deptId}`;
+  const mode: DepartmentVotingMode = options?.votingMode === 'grouped' ? 'grouped' : 'standard';
+  const clampedSeats =
+    mode === 'grouped'
+      ? Math.max(2, Math.min(50, Math.floor(seats)))
+      : Math.max(1, Math.min(50, Math.floor(seats)));
+
   try {
-    await setDoc(doc(db, 'sessions', sessionId, 'departments', deptId), {
+    const payload: Record<string, unknown> = {
       sessionId,
       department: clampString(department, 120),
       roleTitle: clampString(roleTitle, 140),
-      seats: Math.max(1, Math.min(50, Math.floor(seats))),
+      votingMode: mode,
+      seats: clampedSeats,
       order: Math.max(0, Math.min(2000, Math.floor(order))),
       status: 'pending',
       activeRoundId: null,
       electedNames: [],
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
-    });
+    };
+    if (mode === 'grouped') {
+      payload.leaderRoleTitle = clampString(
+        options?.leaderRoleTitle || 'Cargo Principal',
+        140
+      );
+      payload.membersRoleTitle = clampString(options?.membersRoleTitle || 'Integrantes', 140);
+      payload.leaderElectedName = null;
+      payload.memberElectedNames = [];
+    }
+    await setDoc(doc(db, 'sessions', sessionId, 'departments', deptId), payload);
   } catch (err) {
     handleFirestoreError(err, OperationType.CREATE, path);
   }
@@ -222,18 +250,31 @@ export async function batchAddManualTemplates(
     const batch = writeBatch(db);
     templates.forEach((tpl, idx) => {
       const deptId = `d_${generateSecureId(16)}`;
-      batch.set(doc(db, 'sessions', sessionId, 'departments', deptId), {
+      const mode: DepartmentVotingMode = tpl.votingMode === 'grouped' ? 'grouped' : 'standard';
+      const seats =
+        mode === 'grouped'
+          ? Math.max(2, Math.min(50, tpl.defaultSeats))
+          : Math.max(1, Math.min(50, tpl.defaultSeats));
+      const payload: Record<string, unknown> = {
         sessionId,
         department: clampString(tpl.department, 120),
         roleTitle: clampString(tpl.roleTitle, 140),
-        seats: Math.max(1, Math.min(50, tpl.defaultSeats)),
+        votingMode: mode,
+        seats,
         order: startOrder + idx,
         status: 'pending',
         activeRoundId: null,
         electedNames: [],
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
-      });
+      };
+      if (mode === 'grouped') {
+        payload.leaderRoleTitle = clampString(tpl.leaderRoleTitle || 'Cargo Principal', 140);
+        payload.membersRoleTitle = clampString(tpl.membersRoleTitle || 'Integrantes', 140);
+        payload.leaderElectedName = null;
+        payload.memberElectedNames = [];
+      }
+      batch.set(doc(db, 'sessions', sessionId, 'departments', deptId), payload);
     });
     await batch.commit();
   } catch (err) {
@@ -247,6 +288,9 @@ export async function updateDepartmentPosition(
   updates: Partial<{
     department: string;
     roleTitle: string;
+    votingMode: DepartmentVotingMode;
+    leaderRoleTitle: string;
+    membersRoleTitle: string;
     seats: number;
     status: DepartmentPosition['status'];
     electedNames: string[];
@@ -257,8 +301,15 @@ export async function updateDepartmentPosition(
     const clean: Record<string, unknown> = { updatedAt: serverTimestamp() };
     if (updates.department !== undefined) clean.department = clampString(updates.department, 120);
     if (updates.roleTitle !== undefined) clean.roleTitle = clampString(updates.roleTitle, 140);
-    if (updates.seats !== undefined)
-      clean.seats = Math.max(1, Math.min(50, Math.floor(updates.seats)));
+    if (updates.votingMode !== undefined) clean.votingMode = updates.votingMode;
+    if (updates.leaderRoleTitle !== undefined)
+      clean.leaderRoleTitle = clampString(updates.leaderRoleTitle, 140);
+    if (updates.membersRoleTitle !== undefined)
+      clean.membersRoleTitle = clampString(updates.membersRoleTitle, 140);
+    if (updates.seats !== undefined) {
+      const minSeats = updates.votingMode === 'grouped' ? 2 : 1;
+      clean.seats = Math.max(minSeats, Math.min(50, Math.floor(updates.seats)));
+    }
     if (updates.status !== undefined) clean.status = updates.status;
     if (updates.electedNames !== undefined) clean.electedNames = updates.electedNames.slice(0, 50);
 
@@ -281,26 +332,40 @@ export async function addCommitteeMember(
   session: SessionData,
   name: string,
   roleLabel: string,
-  currentCommittee: CommitteeMember[]
+  currentCommittee: CommitteeMember[],
+  activeRound?: RoundData | null
 ): Promise<string> {
   const token = `c_${generateSecureId(22)}`;
   const path = `sessions/${session.id}/committee/${token}`;
   const newEnabledCount = currentCommittee.filter((m) => m.enabled).length + 1;
+  const pastorAllowed = computePastorVoteAllowed(
+    newEnabledCount,
+    session.pastorVoteEnabledOverride
+  );
+  const expectedVotersCount = newEnabledCount + (pastorAllowed ? 1 : 0);
 
   try {
-    const batch = writeBatch(db);
-    batch.set(doc(db, 'sessions', session.id, 'committee', token), {
+    await setDoc(doc(db, 'sessions', session.id, 'committee', token), {
       sessionId: session.id,
       name: clampString(name, 120),
       roleLabel: clampString(roleLabel || 'Miembro de Comisión', 80),
       enabled: true,
       createdAt: serverTimestamp(),
     });
-    batch.update(doc(db, 'sessions', session.id), {
+
+    await updateDoc(doc(db, 'sessions', session.id), {
       enabledCommitteeCount: newEnabledCount,
       updatedAt: serverTimestamp(),
     });
-    await batch.commit();
+
+    if (activeRound && activeRound.status !== 'closed') {
+      await updateDoc(doc(db, 'sessions', session.id, 'rounds', activeRound.id), {
+        pastorVoteAllowed: pastorAllowed,
+        expectedVotersCount,
+        updatedAt: serverTimestamp(),
+      });
+    }
+
     return token;
   } catch (err) {
     handleFirestoreError(err, OperationType.CREATE, path);
@@ -324,20 +389,18 @@ export async function toggleCommitteeMember(
   const expectedVotersCount = newEnabledCount + (pastorAllowed ? 1 : 0);
 
   try {
-    const batch = writeBatch(db);
-    batch.update(doc(db, 'sessions', session.id, 'committee', token), { enabled });
-    batch.update(doc(db, 'sessions', session.id), {
+    await updateDoc(doc(db, 'sessions', session.id, 'committee', token), { enabled });
+    await updateDoc(doc(db, 'sessions', session.id), {
       enabledCommitteeCount: newEnabledCount,
       updatedAt: serverTimestamp(),
     });
     if (activeRound && activeRound.status !== 'closed') {
-      batch.update(doc(db, 'sessions', session.id, 'rounds', activeRound.id), {
+      await updateDoc(doc(db, 'sessions', session.id, 'rounds', activeRound.id), {
         pastorVoteAllowed: pastorAllowed,
         expectedVotersCount,
         updatedAt: serverTimestamp(),
       });
     }
-    await batch.commit();
   } catch (err) {
     handleFirestoreError(err, OperationType.UPDATE, path);
   }
@@ -359,20 +422,18 @@ export async function deleteCommitteeMember(
   const expectedVotersCount = newEnabledCount + (pastorAllowed ? 1 : 0);
 
   try {
-    const batch = writeBatch(db);
-    batch.delete(doc(db, 'sessions', session.id, 'committee', token));
-    batch.update(doc(db, 'sessions', session.id), {
+    await deleteDoc(doc(db, 'sessions', session.id, 'committee', token));
+    await updateDoc(doc(db, 'sessions', session.id), {
       enabledCommitteeCount: newEnabledCount,
       updatedAt: serverTimestamp(),
     });
     if (activeRound && activeRound.status !== 'closed') {
-      batch.update(doc(db, 'sessions', session.id, 'rounds', activeRound.id), {
+      await updateDoc(doc(db, 'sessions', session.id, 'rounds', activeRound.id), {
         pastorVoteAllowed: pastorAllowed,
         expectedVotersCount,
         updatedAt: serverTimestamp(),
       });
     }
-    await batch.commit();
   } catch (err) {
     handleFirestoreError(err, OperationType.DELETE, path);
   }
@@ -414,6 +475,8 @@ export async function startRoundForDepartment(params: {
   carryoverElectedNames: string[];
   isTieBreaker: boolean;
   seedCandidates?: { name: string }[];
+  groupedStage?: GroupedRoundStage;
+  carryoverLeaderName?: string | null;
 }): Promise<string> {
   const {
     session,
@@ -423,6 +486,8 @@ export async function startRoundForDepartment(params: {
     carryoverElectedNames,
     isTieBreaker,
     seedCandidates = [],
+    groupedStage,
+    carryoverLeaderName = null,
   } = params;
 
   const roundId = `r_${generateSecureId(18)}`;
@@ -433,15 +498,33 @@ export async function startRoundForDepartment(params: {
   );
   const expectedVotersCount = session.enabledCommitteeCount + (pastorVoteAllowed ? 1 : 0);
 
+  const isGrouped = dept.votingMode === 'grouped' && dept.seats >= 2;
+  const effectiveStage: GroupedRoundStage | undefined = isGrouped
+    ? groupedStage ?? 'leader'
+    : undefined;
+  const ballotSeats = isGrouped
+    ? effectiveStage === 'leader'
+      ? 1
+      : Math.max(1, Math.min(50, seatsForRound))
+    : Math.max(1, Math.min(50, seatsForRound));
+  const totalGroupSeats = isGrouped ? Math.max(2, Math.min(50, dept.seats)) : undefined;
+  const leaderRoleTitle = isGrouped
+    ? clampString(dept.leaderRoleTitle || 'Cargo Principal', 140)
+    : undefined;
+  const membersRoleTitle = isGrouped
+    ? clampString(dept.membersRoleTitle || 'Integrantes', 140)
+    : undefined;
+
   try {
     const batch = writeBatch(db);
 
-    batch.set(doc(db, 'sessions', session.id, 'rounds', roundId), {
+    const roundPayload: Record<string, unknown> = {
       sessionId: session.id,
       departmentId: dept.id,
       departmentName: clampString(dept.department, 120),
       roleTitle: clampString(dept.roleTitle, 140),
-      seats: Math.max(1, Math.min(50, seatsForRound)),
+      votingMode: isGrouped ? 'grouped' : 'standard',
+      seats: ballotSeats,
       isTieBreaker,
       roundNumber,
       status: 'open',
@@ -453,7 +536,18 @@ export async function startRoundForDepartment(params: {
       electedCandidateIds: [],
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
-    });
+    };
+    if (isGrouped && effectiveStage) {
+      roundPayload.groupedStage = effectiveStage;
+      roundPayload.leaderRoleTitle = leaderRoleTitle;
+      roundPayload.membersRoleTitle = membersRoleTitle;
+      roundPayload.totalGroupSeats = totalGroupSeats;
+      roundPayload.carryoverLeaderName = carryoverLeaderName
+        ? clampString(carryoverLeaderName, 140)
+        : null;
+    }
+
+    batch.set(doc(db, 'sessions', session.id, 'rounds', roundId), roundPayload);
 
     const projectorCandidates: ProjectorCandidate[] = [];
     for (const seed of seedCandidates) {
@@ -475,28 +569,38 @@ export async function startRoundForDepartment(params: {
         voteCount: session.showResultsOnProjector ? 0 : null,
         elected: false,
         tied: false,
+        electedRoleLabel: null,
       });
     }
 
-    batch.update(doc(db, 'sessions', session.id, 'departments', dept.id), {
+    const deptUpdates: Record<string, unknown> = {
       status: 'voting',
       activeRoundId: roundId,
       updatedAt: serverTimestamp(),
-    });
+    };
+    if (!isTieBreaker) {
+      deptUpdates.electedNames = [];
+      if (isGrouped) {
+        deptUpdates.leaderElectedName = null;
+        deptUpdates.memberElectedNames = [];
+      }
+    }
+    batch.update(doc(db, 'sessions', session.id, 'departments', dept.id), deptUpdates);
 
     batch.update(doc(db, 'sessions', session.id), {
       activeRoundId: roundId,
       updatedAt: serverTimestamp(),
     });
 
-    batch.set(doc(db, 'sessions', session.id, 'projector', session.projectorKey), {
+    const projectorPayload: Record<string, unknown> = {
       sessionId: session.id,
       churchName: session.churchName,
       year: session.year,
       roundId,
       departmentName: clampString(dept.department, 120),
       roleTitle: clampString(dept.roleTitle, 140),
-      seats: Math.max(1, Math.min(50, seatsForRound)),
+      votingMode: isGrouped ? 'grouped' : 'standard',
+      seats: ballotSeats,
       isTieBreaker,
       roundStatus: 'open',
       showResults: session.showResultsOnProjector,
@@ -504,7 +608,15 @@ export async function startRoundForDepartment(params: {
       expectedVotersCount,
       candidates: projectorCandidates,
       updatedAt: serverTimestamp(),
-    });
+    };
+    if (isGrouped && effectiveStage) {
+      projectorPayload.groupedStage = effectiveStage;
+      projectorPayload.leaderRoleTitle = leaderRoleTitle;
+      projectorPayload.membersRoleTitle = membersRoleTitle;
+      projectorPayload.totalGroupSeats = totalGroupSeats;
+    }
+
+    batch.set(doc(db, 'sessions', session.id, 'projector', session.projectorKey), projectorPayload);
 
     await batch.commit();
     return roundId;
@@ -630,12 +742,20 @@ export async function reopenRound(
       electedCandidateIds: [],
       updatedAt: serverTimestamp(),
     });
-    batch.update(doc(db, 'sessions', session.id, 'departments', round.departmentId), {
+    const deptReset: Record<string, unknown> = {
       status: 'voting',
       activeRoundId: round.id,
       electedNames: round.carryoverElectedNames,
       updatedAt: serverTimestamp(),
-    });
+    };
+    if (round.votingMode === 'grouped') {
+      deptReset.leaderElectedName = round.carryoverLeaderName ?? null;
+      deptReset.memberElectedNames = round.carryoverElectedNames;
+      deptReset.electedNames = round.carryoverLeaderName
+        ? [round.carryoverLeaderName, ...round.carryoverElectedNames]
+        : round.carryoverElectedNames;
+    }
+    batch.update(doc(db, 'sessions', session.id, 'departments', round.departmentId), deptReset);
     batch.update(doc(db, 'sessions', session.id), {
       activeRoundId: round.id,
       updatedAt: serverTimestamp(),
@@ -665,7 +785,22 @@ export async function syncRoundAndProjector(params: {
 }): Promise<void> {
   const { session, round, candidates, ballots, receiptsCount, forceClose = false } = params;
   const path = `sessions/${session.id}/rounds/${round.id}`;
-  const evalResult = evaluateRoundTallies(candidates, ballots, round.seats);
+  const isGrouped = round.votingMode === 'grouped';
+  const groupedEval = isGrouped
+    ? evaluateGroupedRoundTallies({
+        candidates,
+        ballots,
+        totalGroupSeats: round.totalGroupSeats ?? round.seats,
+        groupedStage: round.groupedStage ?? 'leader',
+        carryoverLeaderName: round.carryoverLeaderName ?? null,
+        carryoverElectedNames: round.carryoverElectedNames ?? [],
+      })
+    : null;
+  const standardEval = !isGrouped
+    ? evaluateRoundTallies(candidates, ballots, round.seats)
+    : null;
+
+  const evalResult = groupedEval ?? standardEval!;
 
   const shouldClose =
     forceClose ||
@@ -673,17 +808,22 @@ export async function syncRoundAndProjector(params: {
       round.expectedVotersCount > 0 &&
       receiptsCount >= round.expectedVotersCount);
 
+  const buildGroupedFieldsForProjector = (): Record<string, unknown> => {
+    if (!isGrouped) return {};
+    const out: Record<string, unknown> = {
+      votingMode: 'grouped',
+      groupedStage: round.groupedStage ?? 'leader',
+      totalGroupSeats: round.totalGroupSeats ?? round.seats,
+    };
+    if (round.leaderRoleTitle) out.leaderRoleTitle = round.leaderRoleTitle;
+    if (round.membersRoleTitle) out.membersRoleTitle = round.membersRoleTitle;
+    return out;
+  };
+
   try {
     const batch = writeBatch(db);
 
     if (shouldClose) {
-      const newlyElectedNames = candidates
-        .filter((c) => evalResult.electedIds.includes(c.id))
-        .map((c) => c.name);
-      const combinedElectedNames = Array.from(
-        new Set([...round.carryoverElectedNames, ...newlyElectedNames])
-      ).slice(0, 50);
-
       for (const cand of candidates) {
         const count = evalResult.countsById[cand.id] ?? 0;
         const elected = evalResult.electedIds.includes(cand.id);
@@ -708,24 +848,60 @@ export async function syncRoundAndProjector(params: {
         updatedAt: serverTimestamp(),
       });
 
-      batch.update(doc(db, 'sessions', session.id, 'departments', round.departmentId), {
-        status: evalResult.hasTie ? 'tie' : 'completed',
-        electedNames: combinedElectedNames,
-        activeRoundId: evalResult.hasTie ? round.id : null,
-        updatedAt: serverTimestamp(),
-      });
+      if (isGrouped && groupedEval) {
+        const leaderName = groupedEval.leaderName ?? round.carryoverLeaderName ?? null;
+        const memberNames = groupedEval.memberNames;
+        const combinedElectedNames = Array.from(
+          new Set([...(leaderName ? [leaderName] : []), ...memberNames])
+        ).slice(0, 50);
+
+        batch.update(doc(db, 'sessions', session.id, 'departments', round.departmentId), {
+          status: groupedEval.hasTie ? 'tie' : 'completed',
+          leaderElectedName: leaderName,
+          memberElectedNames: memberNames.slice(0, 50),
+          electedNames: combinedElectedNames,
+          activeRoundId: groupedEval.hasTie ? round.id : null,
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        const newlyElectedNames = candidates
+          .filter((c) => evalResult.electedIds.includes(c.id))
+          .map((c) => c.name);
+        const combinedElectedNames = Array.from(
+          new Set([...round.carryoverElectedNames, ...newlyElectedNames])
+        ).slice(0, 50);
+
+        batch.update(doc(db, 'sessions', session.id, 'departments', round.departmentId), {
+          status: evalResult.hasTie ? 'tie' : 'completed',
+          electedNames: combinedElectedNames,
+          activeRoundId: evalResult.hasTie ? round.id : null,
+          updatedAt: serverTimestamp(),
+        });
+      }
 
       const projCandidates: ProjectorCandidate[] = [...candidates]
         .sort(
           (a, b) => (evalResult.countsById[b.id] ?? 0) - (evalResult.countsById[a.id] ?? 0)
         )
-        .map((c) => ({
-          id: c.id,
-          name: c.name,
-          voteCount: session.showResultsOnProjector ? (evalResult.countsById[c.id] ?? 0) : null,
-          elected: session.showResultsOnProjector ? evalResult.electedIds.includes(c.id) : false,
-          tied: session.showResultsOnProjector ? evalResult.tiedIds.includes(c.id) : false,
-        }));
+        .map((c) => {
+          const isElected = evalResult.electedIds.includes(c.id);
+          let electedRoleLabel: string | null = null;
+          if (session.showResultsOnProjector && isGrouped && groupedEval && isElected) {
+            if (groupedEval.leaderId === c.id) {
+              electedRoleLabel = round.leaderRoleTitle || 'Cargo Principal';
+            } else if (groupedEval.memberIds.includes(c.id)) {
+              electedRoleLabel = round.membersRoleTitle || 'Integrante';
+            }
+          }
+          return {
+            id: c.id,
+            name: c.name,
+            voteCount: session.showResultsOnProjector ? (evalResult.countsById[c.id] ?? 0) : null,
+            elected: session.showResultsOnProjector ? isElected : false,
+            tied: session.showResultsOnProjector ? evalResult.tiedIds.includes(c.id) : false,
+            electedRoleLabel,
+          };
+        });
 
       batch.set(doc(db, 'sessions', session.id, 'projector', session.projectorKey), {
         sessionId: session.id,
@@ -734,6 +910,7 @@ export async function syncRoundAndProjector(params: {
         roundId: round.id,
         departmentName: round.departmentName,
         roleTitle: round.roleTitle,
+        ...buildGroupedFieldsForProjector(),
         seats: round.seats,
         isTieBreaker: round.isTieBreaker,
         roundStatus: evalResult.hasTie ? 'tie' : 'closed',
@@ -770,19 +947,31 @@ export async function syncRoundAndProjector(params: {
 
     const projCandidates: ProjectorCandidate[] = [...candidates]
       .sort((a, b) => (evalResult.countsById[b.id] ?? 0) - (evalResult.countsById[a.id] ?? 0))
-      .map((c) => ({
-        id: c.id,
-        name: c.name,
-        voteCount: session.showResultsOnProjector ? (evalResult.countsById[c.id] ?? 0) : null,
-        elected:
+      .map((c) => {
+        const isElected =
           round.status === 'closed' && session.showResultsOnProjector
             ? round.electedCandidateIds.includes(c.id)
-            : false,
-        tied:
-          round.status === 'closed' && session.showResultsOnProjector
-            ? round.tiedCandidateIds.includes(c.id)
-            : false,
-      }));
+            : false;
+        let electedRoleLabel: string | null = null;
+        if (isElected && isGrouped && groupedEval) {
+          if (groupedEval.leaderId === c.id) {
+            electedRoleLabel = round.leaderRoleTitle || 'Cargo Principal';
+          } else if (groupedEval.memberIds.includes(c.id)) {
+            electedRoleLabel = round.membersRoleTitle || 'Integrante';
+          }
+        }
+        return {
+          id: c.id,
+          name: c.name,
+          voteCount: session.showResultsOnProjector ? (evalResult.countsById[c.id] ?? 0) : null,
+          elected: isElected,
+          tied:
+            round.status === 'closed' && session.showResultsOnProjector
+              ? round.tiedCandidateIds.includes(c.id)
+              : false,
+          electedRoleLabel,
+        };
+      });
 
     const projStatus: 'idle' | 'open' | 'paused' | 'closed' | 'tie' =
       round.status === 'closed'
@@ -798,6 +987,7 @@ export async function syncRoundAndProjector(params: {
       roundId: round.id,
       departmentName: round.departmentName,
       roleTitle: round.roleTitle,
+      ...buildGroupedFieldsForProjector(),
       seats: round.seats,
       isTieBreaker: round.isTieBreaker,
       roundStatus: projStatus,

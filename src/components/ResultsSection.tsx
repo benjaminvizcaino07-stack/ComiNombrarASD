@@ -35,7 +35,7 @@ import {
   exportFinalListPDF,
   groupDepartmentsForReport,
 } from '../utils/exportReports';
-import { evaluateRoundTallies } from '../utils/tally';
+import { evaluateGroupedRoundTallies, evaluateRoundTallies } from '../utils/tally';
 
 interface ResultsSectionProps {
   session: SessionData | null;
@@ -91,10 +91,25 @@ export const ResultsSection: React.FC<ResultsSectionProps> = ({
     ? departments.find((d) => d.id === activeRound.departmentId) ?? null
     : null;
 
-  const liveEval =
-    activeRound && isAdmin
-      ? evaluateRoundTallies(activeCandidates, ballots, activeRound.seats)
+  const isGroupedRound = Boolean(activeRound && activeRound.votingMode === 'grouped');
+
+  const groupedEval =
+    activeRound && isAdmin && isGroupedRound
+      ? evaluateGroupedRoundTallies({
+          candidates: activeCandidates,
+          ballots,
+          totalGroupSeats: activeRound.totalGroupSeats ?? activeRound.seats,
+          groupedStage: activeRound.groupedStage ?? 'leader',
+          carryoverLeaderName: activeRound.carryoverLeaderName ?? null,
+          carryoverElectedNames: activeRound.carryoverElectedNames ?? [],
+        })
       : null;
+
+  const liveEval =
+    groupedEval ??
+    (activeRound && isAdmin
+      ? evaluateRoundTallies(activeCandidates, ballots, activeRound.seats)
+      : null);
 
   const sortedCandidates = [...activeCandidates].sort((a, b) => {
     const countA = liveEval ? (liveEval.countsById[a.id] ?? a.voteCount) : a.voteCount;
@@ -123,26 +138,66 @@ export const ResultsSection: React.FC<ResultsSectionProps> = ({
     );
     if (tiedCands.length < 2) return;
 
-    const alreadyElectedThisRound = activeCandidates
-      .filter((c) => activeRound.electedCandidateIds.includes(c.id))
-      .map((c) => c.name);
-    const carryover = Array.from(
-      new Set([...activeRound.carryoverElectedNames, ...alreadyElectedThisRound])
-    );
-    const remainingSeats = Math.max(1, activeRound.seats - alreadyElectedThisRound.length);
     const roundsForDept = allRounds.filter((r) => r.departmentId === activeDepartment.id);
-
     setLaunchingTieBreaker(true);
     try {
-      await startRoundForDepartment({
-        session,
-        dept: activeDepartment,
-        roundNumber: roundsForDept.length + 1,
-        seatsForRound: remainingSeats,
-        carryoverElectedNames: carryover,
-        isTieBreaker: true,
-        seedCandidates: tiedCands.map((c) => ({ name: c.name })),
-      });
+      if (isGroupedRound) {
+        const evalRes =
+          groupedEval ??
+          evaluateGroupedRoundTallies({
+            candidates: activeCandidates,
+            ballots,
+            totalGroupSeats: activeRound.totalGroupSeats ?? activeRound.seats,
+            groupedStage: activeRound.groupedStage ?? 'leader',
+            carryoverLeaderName: activeRound.carryoverLeaderName ?? null,
+            carryoverElectedNames: activeRound.carryoverElectedNames ?? [],
+          });
+
+        if (evalRes.tieStage === 'leader') {
+          await startRoundForDepartment({
+            session,
+            dept: activeDepartment,
+            roundNumber: roundsForDept.length + 1,
+            seatsForRound: 1,
+            carryoverElectedNames: evalRes.guaranteedOtherNamesForTie,
+            carryoverLeaderName: null,
+            groupedStage: 'leader',
+            isTieBreaker: true,
+            seedCandidates: tiedCands.map((c) => ({ name: c.name })),
+          });
+        } else {
+          await startRoundForDepartment({
+            session,
+            dept: activeDepartment,
+            roundNumber: roundsForDept.length + 1,
+            seatsForRound: evalRes.remainingSeats,
+            carryoverElectedNames: evalRes.memberNames,
+            carryoverLeaderName:
+              evalRes.leaderName ?? activeRound.carryoverLeaderName ?? null,
+            groupedStage: 'members_tiebreaker',
+            isTieBreaker: true,
+            seedCandidates: tiedCands.map((c) => ({ name: c.name })),
+          });
+        }
+      } else {
+        const alreadyElectedThisRound = activeCandidates
+          .filter((c) => activeRound.electedCandidateIds.includes(c.id))
+          .map((c) => c.name);
+        const carryover = Array.from(
+          new Set([...activeRound.carryoverElectedNames, ...alreadyElectedThisRound])
+        );
+        const remainingSeats = Math.max(1, activeRound.seats - alreadyElectedThisRound.length);
+
+        await startRoundForDepartment({
+          session,
+          dept: activeDepartment,
+          roundNumber: roundsForDept.length + 1,
+          seatsForRound: remainingSeats,
+          carryoverElectedNames: carryover,
+          isTieBreaker: true,
+          seedCandidates: tiedCands.map((c) => ({ name: c.name })),
+        });
+      }
       onNavigateToVote();
     } finally {
       setLaunchingTieBreaker(false);
@@ -195,7 +250,23 @@ export const ResultsSection: React.FC<ResultsSectionProps> = ({
           <button
             type="button"
             onClick={async () => {
-              await navigator.clipboard.writeText(projectorUrl);
+              try {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                  await navigator.clipboard.writeText(projectorUrl);
+                } else {
+                  throw new Error('Clipboard unavailable');
+                }
+              } catch {
+                const ta = document.createElement('textarea');
+                ta.value = projectorUrl;
+                ta.style.position = 'fixed';
+                ta.style.opacity = '0';
+                document.body.appendChild(ta);
+                ta.focus();
+                ta.select();
+                document.execCommand('copy');
+                document.body.removeChild(ta);
+              }
               setCopiedProjector(true);
               setTimeout(() => setCopiedProjector(false), 2200);
             }}
@@ -233,7 +304,9 @@ export const ResultsSection: React.FC<ResultsSectionProps> = ({
                 <span className="font-semibold text-blue-900">{activeRound.departmentName}</span>
                 <span aria-hidden="true">·</span>
                 <span className="font-mono tabular-nums">
-                  {activeRound.seats} {activeRound.seats === 1 ? 'puesto' : 'puestos'}
+                  {isGroupedRound
+                    ? `Agrupado · ${activeRound.totalGroupSeats ?? activeRound.seats} integrantes totales`
+                    : `${activeRound.seats} ${activeRound.seats === 1 ? 'puesto' : 'puestos'}`}
                 </span>
                 <span aria-hidden="true">·</span>
                 <span
@@ -260,6 +333,30 @@ export const ResultsSection: React.FC<ResultsSectionProps> = ({
               {activeRound.expectedVotersCount}
             </div>
           </div>
+
+          {isGroupedRound &&
+            activeRound.status === 'closed' &&
+            canMemberSeeResults &&
+            activeDepartment &&
+            (activeDepartment.leaderElectedName ||
+              (activeDepartment.memberElectedNames &&
+                activeDepartment.memberElectedNames.length > 0)) && (
+              <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-sm text-emerald-950 space-y-1">
+                {activeDepartment.leaderElectedName && (
+                  <p>
+                    <strong>{activeRound.leaderRoleTitle || 'Cargo Principal'}:</strong>{' '}
+                    {activeDepartment.leaderElectedName}
+                  </p>
+                )}
+                {activeDepartment.memberElectedNames &&
+                  activeDepartment.memberElectedNames.length > 0 && (
+                    <p>
+                      <strong>{activeRound.membersRoleTitle || 'Integrantes'}:</strong>{' '}
+                      {activeDepartment.memberElectedNames.join(', ')}
+                    </p>
+                  )}
+              </div>
+            )}
 
           {/* Tie Warning & Tie-Breaker Action */}
           {hasTie && (
@@ -327,6 +424,16 @@ export const ResultsSection: React.FC<ResultsSectionProps> = ({
                 const isTied =
                   activeRound.status === 'closed' &&
                   activeRound.tiedCandidateIds.includes(cand.id);
+                let electedBadgeText = '· Elegido(a)';
+                if (isElected && isGroupedRound) {
+                  const isLeaderWinner =
+                    groupedEval?.leaderId === cand.id ||
+                    activeDepartment?.leaderElectedName === cand.name ||
+                    activeRound.carryoverLeaderName === cand.name;
+                  electedBadgeText = isLeaderWinner
+                    ? `· Elegido(a): ${activeRound.leaderRoleTitle || 'Cargo Principal'}`
+                    : `· Elegido(a): ${activeRound.membersRoleTitle || 'Integrante'}`;
+                }
 
                 return (
                   <div
@@ -345,7 +452,9 @@ export const ResultsSection: React.FC<ResultsSectionProps> = ({
                         {isTied && <AlertTriangle className="w-5 h-5 text-amber-700 shrink-0" />}
                         <span className="font-bold text-slate-900 truncate">{cand.name}</span>
                         {isElected && (
-                          <span className="text-xs font-bold text-emerald-800">· Elegido(a)</span>
+                          <span className="text-xs font-bold text-emerald-800">
+                            {electedBadgeText}
+                          </span>
                         )}
                         {isTied && (
                           <span className="text-xs font-bold text-amber-800">· Empate</span>
@@ -492,24 +601,24 @@ export const ResultsSection: React.FC<ResultsSectionProps> = ({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {group.positions.map((pos) => (
-                        <tr key={pos.id}>
+                      {group.rows.map((row) => (
+                        <tr key={row.id}>
                           <td className="py-2.5 pr-4 font-medium text-slate-900">
-                            {pos.roleTitle}
+                            {row.roleTitle}
                           </td>
                           <td className="py-2.5 pr-4 text-slate-700">
-                            {pos.electedNames.length > 0 ? (
+                            {row.electedNames.length > 0 ? (
                               <span className="font-semibold text-emerald-900">
-                                {pos.electedNames.join(', ')}
+                                {row.electedNames.join(', ')}
                               </span>
                             ) : (
                               <span className="text-slate-400">
-                                {pos.status === 'tie' ? 'Empate pendiente' : 'Pendiente'}
+                                {row.status === 'tie' ? 'Empate pendiente' : 'Pendiente'}
                               </span>
                             )}
                           </td>
                           <td className="py-2.5 text-right font-mono tabular-nums text-slate-700">
-                            {pos.electedNames.length} / {pos.seats}
+                            {row.electedNames.length} / {row.seats}
                           </td>
                         </tr>
                       ))}

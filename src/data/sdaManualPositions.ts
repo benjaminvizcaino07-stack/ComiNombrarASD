@@ -4,7 +4,123 @@ export interface SdaManualRoleTemplate {
   roleTitle: string;
   defaultSeats: number;
   description: string;
+  votingMode?: 'standard' | 'grouped';
+  leaderRoleTitle?: string;
+  membersRoleTitle?: string;
 }
+
+export const SDA_GROUPED_DEPARTMENT_TEMPLATES: SdaManualRoleTemplate[] = [
+  {
+    id: 'grp_anc',
+    department: 'Ancianato',
+    roleTitle: 'Primer Anciano y Ancianos de Iglesia',
+    defaultSeats: 5,
+    votingMode: 'grouped',
+    leaderRoleTitle: 'Primer Anciano',
+    membersRoleTitle: 'Ancianos de Iglesia',
+    description:
+      'Se proponen los ancianos, se vota por el Primer Anciano y los demás propuestos quedan elegidos como Ancianos de Iglesia.',
+  },
+  {
+    id: 'grp_dia',
+    department: 'Diaconado',
+    roleTitle: 'Diácono Jefe y Diáconos',
+    defaultSeats: 7,
+    votingMode: 'grouped',
+    leaderRoleTitle: 'Diácono Jefe',
+    membersRoleTitle: 'Diáconos',
+    description:
+      'Se proponen los diáconos, se vota por el Diácono Jefe y los demás propuestos completan el cuerpo de Diáconos.',
+  },
+  {
+    id: 'grp_dias',
+    department: 'Diaconisas',
+    roleTitle: 'Diaconisa Jefe y Diaconisas',
+    defaultSeats: 7,
+    votingMode: 'grouped',
+    leaderRoleTitle: 'Diaconisa Jefe',
+    membersRoleTitle: 'Diaconisas',
+    description:
+      'Se proponen las diaconisas, se vota por la Diaconisa Jefe y las demás propuestas completan el cuerpo de Diaconisas.',
+  },
+  {
+    id: 'grp_sec',
+    department: 'Secretaría de Iglesia',
+    roleTitle: 'Secretario(a) y Asociados',
+    defaultSeats: 2,
+    votingMode: 'grouped',
+    leaderRoleTitle: 'Secretario(a) de Iglesia',
+    membersRoleTitle: 'Secretario(a) Asociado(a)',
+    description:
+      'Se proponen los candidatos de secretaría, se vota por el Secretario(a) titular y el resto queda como asociado.',
+  },
+  {
+    id: 'grp_tes',
+    department: 'Tesorería de Iglesia',
+    roleTitle: 'Tesorero(a) y Asociados',
+    defaultSeats: 2,
+    votingMode: 'grouped',
+    leaderRoleTitle: 'Tesorero(a) de Iglesia',
+    membersRoleTitle: 'Tesorero(a) Asociado(a)',
+    description:
+      'Se proponen los candidatos de tesorería, se vota por el Tesorero(a) titular y los demás quedan como asociados.',
+  },
+  {
+    id: 'grp_es',
+    department: 'Escuela Sabática',
+    roleTitle: 'Director(a) y Asociados de Escuela Sabática',
+    defaultSeats: 3,
+    votingMode: 'grouped',
+    leaderRoleTitle: 'Director(a) de Escuela Sabática',
+    membersRoleTitle: 'Directores Asociados de Escuela Sabática',
+    description:
+      'Se proponen los integrantes del equipo, se vota por el Director(a) y los demás quedan como asociados.',
+  },
+  {
+    id: 'grp_mp',
+    department: 'Ministerio Personal',
+    roleTitle: 'Director(a) y Asociados de Ministerio Personal',
+    defaultSeats: 2,
+    votingMode: 'grouped',
+    leaderRoleTitle: 'Director(a) de Ministerio Personal',
+    membersRoleTitle: 'Asociados de Ministerio Personal',
+    description:
+      'Se proponen los integrantes y se elige al Director(a) principal junto con sus asociados.',
+  },
+  {
+    id: 'grp_ja',
+    department: 'Jóvenes Adventistas (JA)',
+    roleTitle: 'Director(a) y Asociados de Jóvenes',
+    defaultSeats: 3,
+    votingMode: 'grouped',
+    leaderRoleTitle: 'Director(a) de Jóvenes',
+    membersRoleTitle: 'Directores Asociados de Jóvenes',
+    description:
+      'Se proponen los líderes juveniles, se vota por el Director(a) y los demás quedan como asociados.',
+  },
+  {
+    id: 'grp_conq',
+    department: 'Conquistadores',
+    roleTitle: 'Director(a) y Subdirectores de Conquistadores',
+    defaultSeats: 3,
+    votingMode: 'grouped',
+    leaderRoleTitle: 'Director(a) del Club de Conquistadores',
+    membersRoleTitle: 'Subdirectores de Conquistadores',
+    description:
+      'Se proponen los guías, se vota por el Director(a) del club y los demás quedan como subdirectores.',
+  },
+  {
+    id: 'grp_ave',
+    department: 'Aventureros',
+    roleTitle: 'Director(a) y Subdirectores de Aventureros',
+    defaultSeats: 3,
+    votingMode: 'grouped',
+    leaderRoleTitle: 'Director(a) del Club de Aventureros',
+    membersRoleTitle: 'Subdirectores de Aventureros',
+    description:
+      'Se proponen los líderes, se vota por el Director(a) y los demás quedan como subdirectores.',
+  },
+];
 
 export const SDA_CHURCH_MANUAL_TEMPLATES: SdaManualRoleTemplate[] = [
   {
