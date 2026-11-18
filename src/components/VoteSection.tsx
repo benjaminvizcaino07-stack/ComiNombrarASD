@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   CheckCircle2,
+  Eye,
+  EyeOff,
   Lock,
   MessageSquareText,
   Pause,
@@ -8,6 +10,7 @@ import {
   Plus,
   RotateCcw,
   Search,
+  Send,
   Shield,
   Trash2,
   Unlock,
@@ -16,10 +19,13 @@ import {
 } from 'lucide-react';
 import {
   castSecretVote,
+  deleteRoundObservation,
   proposeCandidate,
   removeCandidate,
   reopenRound,
+  setObservationsRevealed,
   setRoundPauseState,
+  submitRoundObservation,
   syncRoundAndProjector,
   updateRoundControl,
 } from '../services/nominationService';
@@ -28,6 +34,7 @@ import {
   CommitteeMember,
   EligibleMember,
   RoundData,
+  RoundObservation,
   SecretBallot,
   SessionData,
 } from '../types';
@@ -39,6 +46,7 @@ interface VoteSectionProps {
   committeeMember: CommitteeMember | null;
   activeRound: RoundData | null;
   candidates: CandidateData[];
+  observations: RoundObservation[];
   eligibleMembers: EligibleMember[];
   hasVotedCurrentRound: boolean;
   receiptsCount: number;
@@ -53,6 +61,7 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
   committeeMember,
   activeRound,
   candidates,
+  observations,
   eligibleMembers,
   hasVotedCurrentRound,
   receiptsCount,
@@ -66,11 +75,23 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
   const [proposing, setProposing] = useState(false);
   const [savingControl, setSavingControl] = useState(false);
   const [observationDraft, setObservationDraft] = useState('');
+  const [memberObsInput, setMemberObsInput] = useState('');
+  const [memberObsCandidate, setMemberObsCandidate] = useState('');
+  const [submittingObs, setSubmittingObs] = useState(false);
+  const [togglingReveal, setTogglingReveal] = useState(false);
+  const [localSentObs, setLocalSentObs] = useState<
+    { roundId: string; candidateName: string | null; text: string }[]
+  >([]);
   const [voteError, setVoteError] = useState<string | null>(null);
 
   useEffect(() => {
     setObservationDraft(activeRound?.observation ?? '');
   }, [activeRound?.id, activeRound?.observation]);
+
+  useEffect(() => {
+    setMemberObsCandidate('');
+    setMemberObsInput('');
+  }, [activeRound?.id]);
 
   const canCommitteeVote = Boolean(committeeMember && committeeMember.enabled);
   const canPastorVote = Boolean(
@@ -462,6 +483,7 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
                           candidates,
                           ballots,
                           receiptsCount,
+                          observations,
                           forceClose: true,
                         });
                         onGoToResults();
@@ -665,6 +687,271 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
             )}
           </div>
         )}
+
+      {/* Member Observations Section (Hidden until Pastor clicks "Revelar observaciones") */}
+      {(canCommitteeVote || isAdmin || Boolean(activeRound.observationsRevealed)) && (
+        <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                <MessageSquareText className="w-4 h-4 text-blue-800" />
+                Observaciones de los miembros
+                {isAdmin && (
+                  <span className="font-mono text-xs font-semibold text-slate-500 tabular-nums">
+                    ({observations.length})
+                  </span>
+                )}
+              </h2>
+              <p className="text-xs text-slate-600 mt-0.5">
+                {activeRound.observationsRevealed
+                  ? 'Observaciones visibles para toda la comisión.'
+                  : 'Las observaciones enviadas son privadas y solo serán visibles para todos cuando el pastor las revele.'}
+              </p>
+            </div>
+
+            {isAdmin && (
+              <button
+                type="button"
+                disabled={togglingReveal}
+                onClick={async () => {
+                  setTogglingReveal(true);
+                  setVoteError(null);
+                  try {
+                    await setObservationsRevealed(
+                      session,
+                      activeRound,
+                      observations,
+                      !activeRound.observationsRevealed
+                    );
+                  } catch {
+                    setVoteError(
+                      'No se pudo actualizar la visibilidad de las observaciones. Intenta nuevamente.'
+                    );
+                  } finally {
+                    setTogglingReveal(false);
+                  }
+                }}
+                className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold cursor-pointer disabled:opacity-50 min-h-[40px] whitespace-nowrap shrink-0 ${
+                  activeRound.observationsRevealed
+                    ? 'border border-slate-300 bg-white text-slate-800 hover:bg-slate-50'
+                    : 'bg-blue-800 text-white hover:bg-blue-900'
+                }`}
+              >
+                {activeRound.observationsRevealed ? (
+                  <>
+                    <EyeOff className="w-4 h-4" /> Ocultar observaciones
+                  </>
+                ) : (
+                  <>
+                    <Eye className="w-4 h-4" /> Revelar observaciones
+                  </>
+                )}
+              </button>
+            )}
+          </div>
+
+          {/* Observation Submission Form for enabled members and admin while round is open */}
+          {activeRound.status === 'open' && (canCommitteeVote || isAdmin) && (
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                const cleanText = memberObsInput.trim();
+                if (!cleanText) return;
+                const authorToken = committeeMember?.id
+                  ? committeeMember.id
+                  : isAdmin && adminUid
+                    ? `pastor_${adminUid}`
+                    : null;
+                if (!authorToken) return;
+
+                const authorRole: 'member' | 'pastor' = committeeMember?.id ? 'member' : 'pastor';
+                const candidateName = memberObsCandidate.trim() || null;
+
+                setSubmittingObs(true);
+                setVoteError(null);
+                try {
+                  const wasRevealed = await submitRoundObservation({
+                    sessionId: session.id,
+                    roundId: activeRound.id,
+                    authorToken,
+                    authorRole,
+                    candidateName,
+                    text: cleanText,
+                    revealed: Boolean(activeRound.observationsRevealed),
+                  });
+                  if (!wasRevealed && !isAdmin) {
+                    setLocalSentObs((prev) => [
+                      ...prev,
+                      { roundId: activeRound.id, candidateName, text: cleanText },
+                    ]);
+                  }
+                  setMemberObsInput('');
+                  setMemberObsCandidate('');
+                } catch {
+                  setVoteError(
+                    'No se pudo enviar la observación. Verifica tu conexión o que la ronda siga abierta.'
+                  );
+                } finally {
+                  setSubmittingObs(false);
+                }
+              }}
+              className="space-y-2.5"
+            >
+              <div className="flex flex-col sm:flex-row gap-2.5">
+                {candidates.length > 0 && (
+                  <select
+                    aria-label="Candidato sobre el que haces la observación"
+                    value={memberObsCandidate}
+                    onChange={(e) => setMemberObsCandidate(e.target.value)}
+                    className="sm:w-56 px-3.5 py-2.5 rounded-xl border border-slate-300 bg-white text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-700 min-h-[46px]"
+                  >
+                    <option value="">Observación general</option>
+                    {candidates.map((c) => (
+                      <option key={c.id} value={c.name}>
+                        Sobre: {c.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                <input
+                  type="text"
+                  maxLength={500}
+                  value={memberObsInput}
+                  onChange={(e) => setMemberObsInput(e.target.value)}
+                  placeholder="Escribe una observación sobre los candidatos o el cargo..."
+                  className="flex-1 px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-700 min-h-[46px]"
+                />
+                <button
+                  type="submit"
+                  disabled={submittingObs || !memberObsInput.trim()}
+                  className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-slate-900 text-white text-sm font-semibold hover:bg-slate-800 cursor-pointer disabled:opacity-50 min-h-[46px] whitespace-nowrap"
+                >
+                  <Send className="w-4 h-4" />
+                  {submittingObs ? 'Enviando...' : 'Enviar observación'}
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* Member's own pending confirmation before Pastor reveals */}
+          {!isAdmin &&
+            !activeRound.observationsRevealed &&
+            localSentObs.some((item) => item.roundId === activeRound.id) && (
+              <div className="rounded-xl bg-slate-50 border border-slate-200 p-3.5 space-y-2">
+                <p className="text-xs font-semibold text-slate-700">
+                  Tus observaciones enviadas (ocultas hasta que el pastor las revele):
+                </p>
+                <ul className="space-y-1.5">
+                  {localSentObs
+                    .filter((item) => item.roundId === activeRound.id)
+                    .map((item, idx) => (
+                      <li key={idx} className="text-xs text-slate-700">
+                        {item.candidateName && (
+                          <strong className="text-blue-900">[{item.candidateName}] </strong>
+                        )}
+                        {item.text}
+                      </li>
+                    ))}
+                </ul>
+              </div>
+            )}
+
+          {/* Observations List: Pastor always sees all; Members ONLY see when observationsRevealed is true */}
+          {isAdmin ? (
+            observations.length === 0 ? (
+              <p className="text-xs text-slate-500">
+                Aún no hay observaciones enviadas por los integrantes en esta ronda.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {observations.map((obs) => (
+                  <div
+                    key={obs.id}
+                    className={`rounded-xl border p-3.5 flex items-start justify-between gap-3 ${
+                      obs.revealed
+                        ? 'bg-blue-50/50 border-blue-200'
+                        : 'bg-slate-50 border-slate-200'
+                    }`}
+                  >
+                    <div className="space-y-1 min-w-0">
+                      <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                        <span className="font-semibold text-slate-800">
+                          {obs.authorRole === 'pastor' ? 'Pastor / Secretario' : 'Miembro de comisión'}
+                        </span>
+                        {obs.candidateName && (
+                          <>
+                            <span aria-hidden="true">·</span>
+                            <span className="font-semibold text-blue-900">
+                              Sobre: {obs.candidateName}
+                            </span>
+                          </>
+                        )}
+                        <span aria-hidden="true">·</span>
+                        <span
+                          className={
+                            obs.revealed
+                              ? 'font-semibold text-emerald-800'
+                              : 'font-semibold text-amber-800'
+                          }
+                        >
+                          {obs.revealed ? 'Visible a todos' : 'Oculta'}
+                        </span>
+                      </div>
+                      <p className="text-sm text-slate-900 leading-relaxed">{obs.text}</p>
+                    </div>
+                    <button
+                      type="button"
+                      aria-label="Eliminar observación"
+                      onClick={() => deleteRoundObservation(session.id, activeRound.id, obs.id)}
+                      className="p-2 text-rose-600 hover:bg-rose-50 rounded-lg cursor-pointer shrink-0"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )
+          ) : activeRound.observationsRevealed ? (
+            observations.length === 0 ? (
+              <p className="text-xs text-slate-500">
+                El pastor habilitó las observaciones, pero aún no se han registrado comentarios.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {observations.map((obs) => (
+                  <div
+                    key={obs.id}
+                    className="rounded-xl border border-blue-200 bg-blue-50/50 p-3.5 space-y-1"
+                  >
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                      <span className="font-semibold text-slate-800">
+                        {obs.authorRole === 'pastor' ? 'Pastor / Secretario' : 'Miembro de comisión'}
+                      </span>
+                      {obs.candidateName && (
+                        <>
+                          <span aria-hidden="true">·</span>
+                          <span className="font-semibold text-blue-900">
+                            Sobre: {obs.candidateName}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                    <p className="text-sm text-slate-900 leading-relaxed">{obs.text}</p>
+                  </div>
+                ))}
+              </div>
+            )
+          ) : (
+            <div className="p-3.5 rounded-xl bg-amber-50/70 border border-amber-200 text-xs text-amber-950 flex items-center gap-2">
+              <EyeOff className="w-4 h-4 text-amber-800 shrink-0" />
+              <span>
+                Las observaciones de los miembros permanecerán ocultas hasta que el pastor presione{' '}
+                <strong>Revelar observaciones</strong>.
+              </span>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Secret Ballot Area */}
       <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-4">

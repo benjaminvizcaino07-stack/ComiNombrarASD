@@ -279,6 +279,9 @@
           "type": "string",
           "maxLength": 500
         },
+        "observationsRevealed": {
+          "type": "boolean"
+        },
         "pastorVoteAllowed": {
           "type": "boolean"
         },
@@ -501,6 +504,12 @@
           "type": "string",
           "maxLength": 500
         },
+        "observationsRevealed": {
+          "type": "boolean"
+        },
+        "revealedObservations": {
+          "type": "array"
+        },
         "showResults": {
           "type": "boolean"
         },
@@ -530,6 +539,60 @@
         "updatedAt"
       ]
     }
+    "RoundObservation": {
+      "title": "RoundObservation",
+      "description": "Observación enviada por un integrante de la comisión o el pastor durante una ronda; visible a todos solo cuando el pastor las revela.",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "roundId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "authorToken": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "authorRole": {
+          "type": "string",
+          "enum": ["member", "pastor"]
+        },
+        "candidateName": {
+          "type": "string",
+          "maxLength": 140
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "revealed": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "sessionId",
+        "roundId",
+        "authorToken",
+        "authorRole",
+        "text",
+        "revealed",
+        "createdAt"
+      ]
+    }
   },
   "firestore": {
     "/sessions/{sessionId}": {
@@ -555,6 +618,10 @@
     "/sessions/{sessionId}/rounds/{roundId}/candidates/{candidateId}": {
       "schema": { "$ref": "#/entities/Candidate" },
       "description": "Candidatos propuestos en una ronda."
+    },
+    "/sessions/{sessionId}/rounds/{roundId}/observations/{observationId}": {
+      "schema": { "$ref": "#/entities/RoundObservation" },
+      "description": "Observaciones de la comisión visibles únicamente al ser reveladas por el pastor."
     },
     "/sessions/{sessionId}/rounds/{roundId}/receipts/{receiptId}": {
       "schema": { "$ref": "#/entities/VoteReceipt" },

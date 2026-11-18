@@ -130,7 +130,7 @@ service cloud.firestore {
           'votingMode', 'groupedStage', 'leaderRoleTitle', 'membersRoleTitle',
           'totalGroupSeats', 'carryoverLeaderName', 'seats',
           'isTieBreaker', 'roundNumber', 'status', 'proposalsOpen',
-          'votingStarted', 'observation', 'pastorVoteAllowed',
+          'votingStarted', 'observation', 'observationsRevealed', 'pastorVoteAllowed',
           'expectedVotersCount', 'votesCastCount', 'carryoverElectedNames',
           'tiedCandidateIds', 'electedCandidateIds', 'createdAt', 'updatedAt'
         ])
@@ -151,6 +151,7 @@ service cloud.firestore {
         && (!('proposalsOpen' in data) || data.proposalsOpen is bool)
         && (!('votingStarted' in data) || data.votingStarted is bool)
         && (!('observation' in data) || data.observation == null || (data.observation is string && data.observation.size() <= 500))
+        && (!('observationsRevealed' in data) || data.observationsRevealed is bool)
         && data.pastorVoteAllowed is bool
         && data.expectedVotersCount is int && data.expectedVotersCount >= 0 && data.expectedVotersCount <= 201
         && data.votesCastCount is int && data.votesCastCount >= 0 && data.votesCastCount <= 201
@@ -203,6 +204,30 @@ service cloud.firestore {
         && data.castAt is timestamp;
     }
 
+    function isValidObservation(data, sessionId, roundId) {
+      return data.keys().hasAll([
+          'sessionId', 'roundId', 'authorToken', 'authorRole',
+          'text', 'revealed', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'sessionId', 'roundId', 'authorToken', 'authorRole',
+          'candidateName', 'text', 'revealed', 'createdAt'
+        ])
+        && data.sessionId == sessionId
+        && data.roundId == roundId
+        && isValidId(data.authorToken)
+        && data.authorRole in ['member', 'pastor']
+        && (!('candidateName' in data) || data.candidateName == null || (data.candidateName is string && data.candidateName.size() <= 140))
+        && data.text is string && data.text.size() >= 1 && data.text.size() <= 500
+        && data.revealed is bool
+        && data.createdAt is timestamp;
+    }
+
+    function isObservationsRevealed(sessionId, roundId) {
+      return ('observationsRevealed' in get(/databases/$(database)/documents/sessions/$(sessionId)/rounds/$(roundId)).data)
+        && get(/databases/$(database)/documents/sessions/$(sessionId)/rounds/$(roundId)).data.observationsRevealed == true;
+    }
+
     function isValidProjectorState(data, sessionId) {
       return data.keys().hasAll([
           'sessionId', 'churchName', 'year', 'roundStatus', 'showResults',
@@ -213,6 +238,7 @@ service cloud.firestore {
           'roleTitle', 'votingMode', 'groupedStage', 'leaderRoleTitle',
           'membersRoleTitle', 'totalGroupSeats', 'seats', 'isTieBreaker',
           'roundStatus', 'proposalsOpen', 'votingStarted', 'observation',
+          'observationsRevealed', 'revealedObservations',
           'showResults', 'votesCastCount', 'expectedVotersCount',
           'candidates', 'updatedAt'
         ])
@@ -233,6 +259,8 @@ service cloud.firestore {
         && (!('proposalsOpen' in data) || data.proposalsOpen is bool)
         && (!('votingStarted' in data) || data.votingStarted is bool)
         && (!('observation' in data) || data.observation == null || (data.observation is string && data.observation.size() <= 500))
+        && (!('observationsRevealed' in data) || data.observationsRevealed is bool)
+        && (!('revealedObservations' in data) || (data.revealedObservations is list && data.revealedObservations.size() <= 50))
         && data.showResults is bool
         && data.votesCastCount is int && data.votesCastCount >= 0 && data.votesCastCount <= 250
         && data.expectedVotersCount is int && data.expectedVotersCount >= 0 && data.expectedVotersCount <= 250
@@ -361,6 +389,43 @@ service cloud.firestore {
             && isValidCandidate(incoming(), sessionId, roundId)
             && incoming().createdAt == existing().createdAt;
           allow delete: if isSessionAdmin(sessionId) && isValidId(roundId) && isValidId(candidateId);
+        }
+
+        match /observations/{observationId} {
+          allow get: if isValidId(sessionId) && isValidId(roundId) && isValidId(observationId)
+            && (isSessionAdmin(sessionId) || (existing().sessionId == sessionId && existing().roundId == roundId && existing().revealed == true));
+          allow list: if isSessionAdmin(sessionId)
+            || (isValidId(sessionId) && isValidId(roundId) && existing().revealed == true);
+          allow create: if isValidId(sessionId)
+            && isValidId(roundId)
+            && isValidId(observationId)
+            && isValidObservation(incoming(), sessionId, roundId)
+            && incoming().createdAt == request.time
+            && incoming().revealed == isObservationsRevealed(sessionId, roundId)
+            && get(/databases/$(database)/documents/sessions/$(sessionId)/rounds/$(roundId)).data.status == 'open'
+            && (
+              (
+                isSessionAdmin(sessionId)
+                && incoming().authorRole == 'pastor'
+                && incoming().authorToken == ('pastor_' + request.auth.uid)
+              )
+              || (
+                incoming().authorRole == 'member'
+                && exists(/databases/$(database)/documents/sessions/$(sessionId)/committee/$(incoming().authorToken))
+                && get(/databases/$(database)/documents/sessions/$(sessionId)/committee/$(incoming().authorToken)).data.enabled == true
+              )
+            );
+          allow update: if isSessionAdmin(sessionId)
+            && isValidId(roundId)
+            && isValidId(observationId)
+            && isValidObservation(incoming(), sessionId, roundId)
+            && incoming().sessionId == existing().sessionId
+            && incoming().roundId == existing().roundId
+            && incoming().authorToken == existing().authorToken
+            && incoming().authorRole == existing().authorRole
+            && incoming().text == existing().text
+            && incoming().createdAt == existing().createdAt;
+          allow delete: if isSessionAdmin(sessionId) && isValidId(roundId) && isValidId(observationId);
         }
 
         match /receipts/{receiptId} {

@@ -196,6 +196,31 @@ export const ProjectorView: React.FC<ProjectorViewProps> = ({ sessionId, project
                   {state.observation}
                 </div>
               )}
+
+              {state.observationsRevealed &&
+                state.revealedObservations &&
+                state.revealedObservations.length > 0 && (
+                  <div className="rounded-2xl bg-slate-900 border border-blue-500/40 p-5 space-y-3">
+                    <p className="text-sm font-bold uppercase tracking-wider text-blue-300">
+                      Observaciones de la comisión ({state.revealedObservations.length})
+                    </p>
+                    <div className="grid gap-2.5 sm:grid-cols-2">
+                      {state.revealedObservations.map((obs) => (
+                        <div
+                          key={obs.id}
+                          className="rounded-xl bg-slate-800/80 border border-slate-700 px-4 py-3 text-sm sm:text-base text-slate-100"
+                        >
+                          {obs.candidateName && (
+                            <span className="font-bold text-blue-300 block text-xs sm:text-sm mb-0.5">
+                              Sobre: {obs.candidateName}
+                            </span>
+                          )}
+                          <span>{obs.text}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
             </div>
 
             {!state.showResults ? (

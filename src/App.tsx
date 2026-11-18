@@ -21,6 +21,7 @@ import {
   DepartmentPosition,
   EligibleMember,
   RoundData,
+  RoundObservation,
   SecretBallot,
   SessionData,
 } from './types';
@@ -80,6 +81,7 @@ export default function App() {
   const [committee, setCommittee] = useState<CommitteeMember[]>([]);
   const [rounds, setRounds] = useState<RoundData[]>([]);
   const [activeCandidates, setActiveCandidates] = useState<CandidateData[]>([]);
+  const [activeObservations, setActiveObservations] = useState<RoundObservation[]>([]);
   const [ballots, setBallots] = useState<SecretBallot[]>([]);
   const [receiptsCount, setReceiptsCount] = useState(0);
   const [hasVotedCurrentRound, setHasVotedCurrentRound] = useState(false);
@@ -280,6 +282,39 @@ export default function App() {
     return () => unsub();
   }, [effectiveSessionId, activeRound?.id]);
 
+  // Listen to observations of active round (all for admin; revealed == true only for members)
+  useEffect(() => {
+    if (!effectiveSessionId || !activeRound) {
+      setActiveObservations([]);
+      return;
+    }
+    const path = `sessions/${effectiveSessionId}/rounds/${activeRound.id}/observations`;
+    const obsQuery = isAdmin
+      ? collection(db, 'sessions', effectiveSessionId, 'rounds', activeRound.id, 'observations')
+      : query(
+          collection(db, 'sessions', effectiveSessionId, 'rounds', activeRound.id, 'observations'),
+          where('revealed', '==', true)
+        );
+
+    const getMillis = (val: unknown): number => {
+      if (val && typeof val === 'object' && 'seconds' in val) {
+        return Number((val as { seconds?: number }).seconds ?? 0);
+      }
+      return Number.MAX_SAFE_INTEGER;
+    };
+
+    const unsub = onSnapshot(
+      obsQuery,
+      (snap) => {
+        const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as RoundObservation);
+        list.sort((a, b) => getMillis(a.createdAt) - getMillis(b.createdAt));
+        setActiveObservations(list);
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, path)
+    );
+    return () => unsub();
+  }, [effectiveSessionId, activeRound?.id, isAdmin]);
+
   // Listen to own vote receipt for current voter (committee token OR pastor)
   useEffect(() => {
     if (!effectiveSessionId || !activeRound) {
@@ -360,10 +395,12 @@ export default function App() {
       activeRound.proposalsOpen ? '1' : '0',
       activeRound.votingStarted === false ? '0' : '1',
       activeRound.observation ?? '',
+      activeRound.observationsRevealed ? '1' : '0',
       activeRound.expectedVotersCount,
       receiptsCount,
       ballots.length,
       session.showResultsOnProjector ? '1' : '0',
+      activeObservations.map((o) => `${o.id}:${o.revealed ? 1 : 0}`).join(','),
       activeCandidates.map((c) => `${c.id}:${evalRes.countsById[c.id] ?? 0}:${c.name}`).join(','),
     ].join('|');
 
@@ -378,6 +415,7 @@ export default function App() {
       candidates: activeCandidates,
       ballots,
       receiptsCount,
+      observations: activeObservations,
       forceClose: shouldAutoClose,
     });
   }, [
@@ -385,6 +423,7 @@ export default function App() {
     session,
     activeRound,
     activeCandidates,
+    activeObservations,
     ballots,
     receiptsCount,
   ]);
@@ -553,6 +592,7 @@ export default function App() {
             committeeMember={committeeMember}
             activeRound={activeRound}
             candidates={activeCandidates}
+            observations={activeObservations}
             eligibleMembers={eligibleMembers}
             hasVotedCurrentRound={hasVotedCurrentRound}
             receiptsCount={receiptsCount}

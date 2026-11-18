@@ -2,6 +2,7 @@ import {
   collection,
   deleteDoc,
   doc,
+  getDoc,
   increment,
   serverTimestamp,
   setDoc,
@@ -18,7 +19,9 @@ import {
   GroupedRoundStage,
   PastorVoteOverride,
   ProjectorCandidate,
+  ProjectorObservation,
   RoundData,
+  RoundObservation,
   SecretBallot,
   SessionData,
 } from '../types';
@@ -68,6 +71,8 @@ export async function createSession(
       seats: 1,
       isTieBreaker: false,
       roundStatus: 'idle',
+      observationsRevealed: false,
+      revealedObservations: [],
       showResults: false,
       votesCastCount: 0,
       expectedVotersCount: 0,
@@ -531,6 +536,7 @@ export async function startRoundForDepartment(params: {
       proposalsOpen: !isTieBreaker,
       votingStarted: isTieBreaker,
       observation: null,
+      observationsRevealed: false,
       pastorVoteAllowed,
       expectedVotersCount,
       votesCastCount: 0,
@@ -609,6 +615,8 @@ export async function startRoundForDepartment(params: {
       proposalsOpen: !isTieBreaker,
       votingStarted: isTieBreaker,
       observation: null,
+      observationsRevealed: false,
+      revealedObservations: [],
       showResults: session.showResultsOnProjector,
       votesCastCount: 0,
       expectedVotersCount,
@@ -774,6 +782,113 @@ export async function updateRoundControl(
   }
 }
 
+function buildProjectorObservations(
+  observations: RoundObservation[],
+  revealed: boolean
+): ProjectorObservation[] {
+  if (!revealed) return [];
+  return observations.slice(0, 50).map((obs) => ({
+    id: obs.id,
+    authorRole: obs.authorRole,
+    candidateName: obs.candidateName ?? null,
+    text: clampString(obs.text, 500),
+  }));
+}
+
+export async function submitRoundObservation(params: {
+  sessionId: string;
+  roundId: string;
+  authorToken: string;
+  authorRole: 'member' | 'pastor';
+  candidateName?: string | null;
+  text: string;
+  revealed: boolean;
+}): Promise<boolean> {
+  const { sessionId, roundId, authorToken, authorRole, candidateName, text, revealed } = params;
+  const cleanText = clampString(text, 500);
+  if (!cleanText) return false;
+
+  const obsId = `obs_${generateSecureId(16)}`;
+  const path = `sessions/${sessionId}/rounds/${roundId}/observations/${obsId}`;
+  try {
+    const roundSnap = await getDoc(doc(db, 'sessions', sessionId, 'rounds', roundId));
+    const currentRevealed = roundSnap.exists()
+      ? Boolean(roundSnap.data()?.observationsRevealed)
+      : revealed;
+
+    await setDoc(doc(db, 'sessions', sessionId, 'rounds', roundId, 'observations', obsId), {
+      sessionId,
+      roundId,
+      authorToken,
+      authorRole,
+      candidateName: candidateName ? clampString(candidateName, 140) : null,
+      text: cleanText,
+      revealed: currentRevealed,
+      createdAt: serverTimestamp(),
+    });
+    return currentRevealed;
+  } catch (err) {
+    handleFirestoreError(err, OperationType.CREATE, path);
+  }
+}
+
+export async function deleteRoundObservation(
+  sessionId: string,
+  roundId: string,
+  observationId: string
+): Promise<void> {
+  const path = `sessions/${sessionId}/rounds/${roundId}/observations/${observationId}`;
+  try {
+    await deleteDoc(doc(db, 'sessions', sessionId, 'rounds', roundId, 'observations', observationId));
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, path);
+  }
+}
+
+export async function setObservationsRevealed(
+  session: SessionData,
+  round: RoundData,
+  observations: RoundObservation[],
+  revealed: boolean
+): Promise<void> {
+  const path = `sessions/${session.id}/rounds/${round.id}`;
+  try {
+    const batch = writeBatch(db);
+    batch.update(doc(db, 'sessions', session.id, 'rounds', round.id), {
+      observationsRevealed: revealed,
+      updatedAt: serverTimestamp(),
+    });
+    batch.update(doc(db, 'sessions', session.id, 'projector', session.projectorKey), {
+      observationsRevealed: revealed,
+      revealedObservations: buildProjectorObservations(observations, revealed),
+      updatedAt: serverTimestamp(),
+    });
+
+    const toUpdate = observations.filter((obs) => obs.revealed !== revealed);
+    const firstChunk = toUpdate.slice(0, 400);
+    for (const obs of firstChunk) {
+      batch.update(
+        doc(db, 'sessions', session.id, 'rounds', round.id, 'observations', obs.id),
+        { revealed }
+      );
+    }
+    await batch.commit();
+
+    for (let i = 400; i < toUpdate.length; i += 400) {
+      const extraBatch = writeBatch(db);
+      for (const obs of toUpdate.slice(i, i + 400)) {
+        extraBatch.update(
+          doc(db, 'sessions', session.id, 'rounds', round.id, 'observations', obs.id),
+          { revealed }
+        );
+      }
+      await extraBatch.commit();
+    }
+  } catch (err) {
+    handleFirestoreError(err, OperationType.UPDATE, path);
+  }
+}
+
 export async function reopenRound(
   session: SessionData,
   round: RoundData,
@@ -827,9 +942,18 @@ export async function syncRoundAndProjector(params: {
   candidates: CandidateData[];
   ballots: SecretBallot[];
   receiptsCount: number;
+  observations?: RoundObservation[];
   forceClose?: boolean;
 }): Promise<void> {
-  const { session, round, candidates, ballots, receiptsCount, forceClose = false } = params;
+  const {
+    session,
+    round,
+    candidates,
+    ballots,
+    receiptsCount,
+    observations = [],
+    forceClose = false,
+  } = params;
   const path = `sessions/${session.id}/rounds/${round.id}`;
   const isGrouped = round.votingMode === 'grouped';
   const groupedEval = isGrouped
@@ -963,6 +1087,11 @@ export async function syncRoundAndProjector(params: {
         proposalsOpen: false,
         votingStarted: round.votingStarted ?? true,
         observation: round.observation ?? null,
+        observationsRevealed: Boolean(round.observationsRevealed),
+        revealedObservations: buildProjectorObservations(
+          observations,
+          Boolean(round.observationsRevealed)
+        ),
         showResults: session.showResultsOnProjector,
         votesCastCount: receiptsCount,
         expectedVotersCount: round.expectedVotersCount,
@@ -1043,6 +1172,11 @@ export async function syncRoundAndProjector(params: {
       proposalsOpen: round.proposalsOpen ?? !round.isTieBreaker,
       votingStarted: round.votingStarted ?? true,
       observation: round.observation ?? null,
+      observationsRevealed: Boolean(round.observationsRevealed),
+      revealedObservations: buildProjectorObservations(
+        observations,
+        Boolean(round.observationsRevealed)
+      ),
       showResults: session.showResultsOnProjector,
       votesCastCount: receiptsCount,
       expectedVotersCount: round.expectedVotersCount,

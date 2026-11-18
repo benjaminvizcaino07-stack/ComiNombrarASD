@@ -81,6 +81,7 @@ export interface RoundData {
   proposalsOpen?: boolean;
   votingStarted?: boolean;
   observation?: string | null;
+  observationsRevealed?: boolean;
   pastorVoteAllowed: boolean;
   expectedVotersCount: number;
   votesCastCount: number;
@@ -111,6 +112,25 @@ export interface SecretBallot {
   castAt?: unknown;
 }
 
+export interface RoundObservation {
+  id: string;
+  sessionId: string;
+  roundId: string;
+  authorToken: string;
+  authorRole: 'member' | 'pastor';
+  candidateName?: string | null;
+  text: string;
+  revealed: boolean;
+  createdAt?: unknown;
+}
+
+export interface ProjectorObservation {
+  id: string;
+  authorRole: 'member' | 'pastor';
+  candidateName?: string | null;
+  text: string;
+}
+
 export interface ProjectorCandidate {
   id: string;
   name: string;
@@ -138,6 +158,8 @@ export interface ProjectorState {
   proposalsOpen?: boolean;
   votingStarted?: boolean;
   observation?: string | null;
+  observationsRevealed?: boolean;
+  revealedObservations?: ProjectorObservation[];
   showResults: boolean;
   votesCastCount: number;
   expectedVotersCount: number;
