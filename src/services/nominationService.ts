@@ -529,6 +529,11 @@ export async function startRoundForDepartment(params: {
     ? clampString(dept.membersRoleTitle || 'Integrantes', 140)
     : undefined;
 
+  const maxProposals =
+    !isTieBreaker && typeof dept.maxProposals === 'number'
+      ? Math.max(1, Math.min(50, Math.floor(dept.maxProposals)))
+      : null;
+
   try {
     const batch = writeBatch(db);
 
@@ -539,6 +544,7 @@ export async function startRoundForDepartment(params: {
       roleTitle: clampString(dept.roleTitle, 140),
       votingMode: isGrouped ? 'grouped' : 'standard',
       seats: ballotSeats,
+      maxProposals,
       isTieBreaker,
       roundNumber,
       status: 'open',
@@ -619,6 +625,7 @@ export async function startRoundForDepartment(params: {
       roleTitle: clampString(dept.roleTitle, 140),
       votingMode: isGrouped ? 'grouped' : 'standard',
       seats: ballotSeats,
+      maxProposals,
       isTieBreaker,
       roundStatus: 'open',
       proposalsOpen: !isTieBreaker,
@@ -758,6 +765,7 @@ export async function updateRoundControl(
     proposalsOpen: boolean;
     votingStarted: boolean;
     observation: string | null;
+    maxProposals: number | null;
   }>
 ): Promise<void> {
   const path = `sessions/${session.id}/rounds/${round.id}`;
@@ -779,12 +787,60 @@ export async function updateRoundControl(
       roundUpdates.observation = cleanObs;
       projectorUpdates.observation = cleanObs;
     }
+    if (updates.maxProposals !== undefined) {
+      const cleanMax =
+        updates.maxProposals === null
+          ? null
+          : Math.max(1, Math.min(50, Math.floor(updates.maxProposals)));
+      roundUpdates.maxProposals = cleanMax;
+      projectorUpdates.maxProposals = cleanMax;
+      batch.update(doc(db, 'sessions', session.id, 'departments', round.departmentId), {
+        maxProposals: cleanMax,
+        updatedAt: serverTimestamp(),
+      });
+    }
 
     batch.update(doc(db, 'sessions', session.id, 'rounds', round.id), roundUpdates);
     batch.update(
       doc(db, 'sessions', session.id, 'projector', session.projectorKey),
       projectorUpdates
     );
+    await batch.commit();
+  } catch (err) {
+    handleFirestoreError(err, OperationType.UPDATE, path);
+  }
+}
+
+export async function updateDepartmentMaxProposals(
+  session: SessionData,
+  deptId: string,
+  maxProposals: number | null,
+  activeRound?: RoundData | null
+): Promise<void> {
+  const path = `sessions/${session.id}/departments/${deptId}`;
+  const cleanMax =
+    maxProposals === null ? null : Math.max(1, Math.min(50, Math.floor(maxProposals)));
+  try {
+    const batch = writeBatch(db);
+    batch.update(doc(db, 'sessions', session.id, 'departments', deptId), {
+      maxProposals: cleanMax,
+      updatedAt: serverTimestamp(),
+    });
+    if (
+      activeRound &&
+      activeRound.departmentId === deptId &&
+      activeRound.status !== 'closed' &&
+      !activeRound.isTieBreaker
+    ) {
+      batch.update(doc(db, 'sessions', session.id, 'rounds', activeRound.id), {
+        maxProposals: cleanMax,
+        updatedAt: serverTimestamp(),
+      });
+      batch.update(doc(db, 'sessions', session.id, 'projector', session.projectorKey), {
+        maxProposals: cleanMax,
+        updatedAt: serverTimestamp(),
+      });
+    }
     await batch.commit();
   } catch (err) {
     handleFirestoreError(err, OperationType.UPDATE, path);
@@ -1091,6 +1147,7 @@ export async function syncRoundAndProjector(params: {
         roleTitle: round.roleTitle,
         ...buildGroupedFieldsForProjector(),
         seats: round.seats,
+        maxProposals: round.maxProposals ?? null,
         isTieBreaker: round.isTieBreaker,
         roundStatus: evalResult.hasTie ? 'tie' : 'closed',
         proposalsOpen: false,
@@ -1176,6 +1233,7 @@ export async function syncRoundAndProjector(params: {
       roleTitle: round.roleTitle,
       ...buildGroupedFieldsForProjector(),
       seats: round.seats,
+      maxProposals: round.maxProposals ?? null,
       isTieBreaker: round.isTieBreaker,
       roundStatus: projStatus,
       proposalsOpen: round.proposalsOpen ?? !round.isTieBreaker,

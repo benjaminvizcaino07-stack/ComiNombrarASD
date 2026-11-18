@@ -139,6 +139,14 @@ export const ProjectorView: React.FC<ProjectorViewProps> = ({ sessionId, project
                     {(state.seats ?? 1) === 1 ? 'puesto disponible' : 'puestos disponibles'}
                   </span>
                 )}
+                {state.maxProposals != null && !state.isTieBreaker && (
+                  <>
+                    <span aria-hidden="true">·</span>
+                    <span className="font-mono tabular-nums text-slate-200">
+                      Propuestas: {state.candidates.length} / {state.maxProposals}
+                    </span>
+                  </>
+                )}
                 {state.isTieBreaker && (
                   <>
                     <span aria-hidden="true">·</span>

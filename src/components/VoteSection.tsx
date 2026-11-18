@@ -5,6 +5,7 @@ import {
   EyeOff,
   Lock,
   MessageSquareText,
+  Minus,
   Pause,
   Play,
   Plus,
@@ -12,10 +13,12 @@ import {
   Search,
   Send,
   Shield,
+  SlidersHorizontal,
   Trash2,
   Unlock,
   UserPlus,
   Users,
+  X,
 } from 'lucide-react';
 import {
   castSecretVote,
@@ -27,11 +30,13 @@ import {
   setRoundPauseState,
   submitRoundObservation,
   syncRoundAndProjector,
+  updateDepartmentMaxProposals,
   updateRoundControl,
 } from '../services/nominationService';
 import {
   CandidateData,
   CommitteeMember,
+  DepartmentPosition,
   EligibleMember,
   RoundData,
   RoundObservation,
@@ -44,6 +49,7 @@ interface VoteSectionProps {
   isAdmin: boolean;
   adminUid: string | null;
   committeeMember: CommitteeMember | null;
+  departments: DepartmentPosition[];
   activeRound: RoundData | null;
   candidates: CandidateData[];
   observations: RoundObservation[];
@@ -59,6 +65,7 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
   isAdmin,
   adminUid,
   committeeMember,
+  departments,
   activeRound,
   candidates,
   observations,
@@ -83,6 +90,12 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
     { roundId: string; candidateName: string | null; text: string }[]
   >([]);
   const [voteError, setVoteError] = useState<string | null>(null);
+  const [showProposalLimitModal, setShowProposalLimitModal] = useState(false);
+  const [selectedDeptIdForLimit, setSelectedDeptIdForLimit] = useState('');
+  const [limitMode, setLimitMode] = useState<'unlimited' | 'limited'>('unlimited');
+  const [limitValue, setLimitValue] = useState<number>(3);
+  const [savingProposalLimit, setSavingProposalLimit] = useState(false);
+  const [proposalLimitNotice, setProposalLimitNotice] = useState<string | null>(null);
 
   useEffect(() => {
     setObservationDraft(activeRound?.observation ?? '');
@@ -111,6 +124,253 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
       .filter((m) => m.active && !existingNames.has(m.name.trim().toLowerCase()))
       .filter((m) => (!q ? true : m.name.toLowerCase().includes(q)));
   }, [eligibleMembers, candidates, proposalInput]);
+
+  const orderedDepartments = useMemo(
+    () => [...departments].sort((a, b) => a.order - b.order),
+    [departments]
+  );
+
+  const loadDeptLimitIntoModal = (deptId: string) => {
+    const dept = orderedDepartments.find((d) => d.id === deptId);
+    const currentLimit =
+      activeRound && activeRound.departmentId === deptId
+        ? (activeRound.maxProposals ?? dept?.maxProposals ?? null)
+        : (dept?.maxProposals ?? null);
+    setSelectedDeptIdForLimit(deptId);
+    if (typeof currentLimit === 'number' && currentLimit >= 1) {
+      setLimitMode('limited');
+      setLimitValue(currentLimit);
+    } else {
+      setLimitMode('unlimited');
+      setLimitValue(Math.max(2, (dept?.seats ?? 1) + 1));
+    }
+  };
+
+  const openProposalLimitModal = (initialDeptId?: string) => {
+    const targetId =
+      initialDeptId || activeRound?.departmentId || orderedDepartments[0]?.id || '';
+    if (!targetId) return;
+    setProposalLimitNotice(null);
+    loadDeptLimitIntoModal(targetId);
+    setShowProposalLimitModal(true);
+  };
+
+  const handleSaveProposalLimit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!session || !selectedDeptIdForLimit) return;
+    setSavingProposalLimit(true);
+    setVoteError(null);
+    setProposalLimitNotice(null);
+    try {
+      const nextValue =
+        limitMode === 'unlimited'
+          ? null
+          : Math.max(1, Math.min(50, Math.floor(limitValue || 1)));
+      await updateDepartmentMaxProposals(
+        session,
+        selectedDeptIdForLimit,
+        nextValue,
+        activeRound
+      );
+      const targetDept = orderedDepartments.find((d) => d.id === selectedDeptIdForLimit);
+      const label = targetDept ? `${targetDept.department} (${targetDept.roleTitle})` : 'el departamento';
+      setProposalLimitNotice(
+        nextValue === null
+          ? `Sin límite de propuestas para ${label}.`
+          : `Límite guardado: hasta ${nextValue} ${nextValue === 1 ? 'propuesta' : 'propuestas'} para ${label}.`
+      );
+      if (activeRound && activeRound.departmentId === selectedDeptIdForLimit) {
+        setShowProposalLimitModal(false);
+      }
+    } catch {
+      setVoteError('No se pudo guardar la cantidad de propuestas. Intenta nuevamente.');
+    } finally {
+      setSavingProposalLimit(false);
+    }
+  };
+
+  const proposalLimitModal =
+    showProposalLimitModal && isAdmin && session ? (
+      <div className="fixed inset-0 z-50 bg-slate-950/50 backdrop-blur-xs flex items-center justify-center p-4">
+        <div className="bg-white border border-slate-200 rounded-2xl max-w-lg w-full overflow-hidden">
+          <div className="p-5 border-b border-slate-200 flex items-center justify-between gap-3">
+            <div>
+              <h3 className="text-lg font-bold text-slate-900">
+                Cantidad de propuestas por departamento
+              </h3>
+              <p className="text-xs text-slate-600 mt-0.5">
+                Define cuántas propuestas de nombres se pueden registrar antes o durante la votación.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowProposalLimitModal(false)}
+              className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          <form onSubmit={handleSaveProposalLimit} className="p-5 space-y-4">
+            <div>
+              <label
+                htmlFor="proposal-limit-dept"
+                className="block text-xs font-semibold text-slate-700 mb-1.5"
+              >
+                Departamento / Cargo
+              </label>
+              <select
+                id="proposal-limit-dept"
+                value={selectedDeptIdForLimit}
+                onChange={(e) => {
+                  setProposalLimitNotice(null);
+                  loadDeptLimitIntoModal(e.target.value);
+                }}
+                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 bg-white text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-700 min-h-[44px]"
+              >
+                {orderedDepartments.map((dept) => {
+                  const deptLimit =
+                    activeRound && activeRound.departmentId === dept.id
+                      ? (activeRound.maxProposals ?? dept.maxProposals ?? null)
+                      : (dept.maxProposals ?? null);
+                  return (
+                    <option key={dept.id} value={dept.id}>
+                      {dept.department} — {dept.roleTitle}
+                      {deptLimit != null ? ` (Máx. ${deptLimit} propuestas)` : ' (Sin límite)'}
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+
+            {activeRound && activeRound.departmentId === selectedDeptIdForLimit && (
+              <p className="text-xs text-blue-900 bg-blue-50 border border-blue-200 rounded-xl px-3.5 py-2.5">
+                Departamento en votación actual · Propuestas registradas hasta ahora:{' '}
+                <strong className="font-mono tabular-nums">{candidates.length}</strong>
+              </p>
+            )}
+
+            <div className="space-y-2.5">
+              <span className="block text-xs font-semibold text-slate-700">
+                Límite de propuestas permitidas
+              </span>
+              <div className="grid grid-cols-2 p-1 bg-slate-100 rounded-xl gap-1">
+                <button
+                  type="button"
+                  onClick={() => setLimitMode('unlimited')}
+                  className={`py-2 px-3 rounded-lg text-xs font-semibold transition-colors cursor-pointer min-h-[40px] ${
+                    limitMode === 'unlimited'
+                      ? 'bg-white text-slate-900 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Sin límite
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLimitMode('limited')}
+                  className={`py-2 px-3 rounded-lg text-xs font-semibold transition-colors cursor-pointer min-h-[40px] ${
+                    limitMode === 'limited'
+                      ? 'bg-white text-slate-900 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Definir cantidad
+                </button>
+              </div>
+            </div>
+
+            {limitMode === 'limited' && (
+              <div className="space-y-3 p-4 rounded-xl bg-slate-50 border border-slate-200">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-xs font-semibold text-slate-700">
+                    Máximo de propuestas:
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setLimitValue((v) => Math.max(1, v - 1))}
+                      aria-label="Disminuir cantidad"
+                      className="w-10 h-10 rounded-xl border border-slate-300 bg-white text-slate-800 flex items-center justify-center hover:bg-slate-100 cursor-pointer"
+                    >
+                      <Minus className="w-4 h-4" />
+                    </button>
+                    <input
+                      type="number"
+                      min={1}
+                      max={50}
+                      value={limitValue}
+                      onChange={(e) => {
+                        const n = parseInt(e.target.value, 10);
+                        setLimitValue(Number.isNaN(n) ? 1 : Math.max(1, Math.min(50, n)));
+                      }}
+                      className="w-16 text-center py-2 rounded-xl border border-slate-300 bg-white font-mono font-bold text-base text-slate-900 tabular-nums focus:outline-none focus:ring-2 focus:ring-blue-700"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setLimitValue((v) => Math.min(50, v + 1))}
+                      aria-label="Aumentar cantidad"
+                      className="w-10 h-10 rounded-xl border border-slate-300 bg-white text-slate-800 flex items-center justify-center hover:bg-slate-100 cursor-pointer"
+                    >
+                      <Plus className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-1.5">
+                  {[2, 3, 4, 5, 6, 8, 10, 12].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setLimitValue(preset)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-mono font-semibold border cursor-pointer transition-colors tabular-nums ${
+                        limitValue === preset
+                          ? 'bg-blue-800 border-blue-800 text-white'
+                          : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-100'
+                      }`}
+                    >
+                      {preset}
+                    </button>
+                  ))}
+                </div>
+
+                {activeRound &&
+                  activeRound.departmentId === selectedDeptIdForLimit &&
+                  candidates.length > limitValue && (
+                    <p className="text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                      Ya hay {candidates.length} propuestas registradas en esta ronda; no se podrán
+                      agregar nuevas hasta ajustar el límite o quitar nombres.
+                    </p>
+                  )}
+              </div>
+            )}
+
+            {proposalLimitNotice && (
+              <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-xs font-medium text-emerald-900">
+                {proposalLimitNotice}
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setShowProposalLimitModal(false)}
+                className="px-4 py-2.5 rounded-xl border border-slate-300 bg-white text-slate-700 text-sm font-semibold hover:bg-slate-50 cursor-pointer min-h-[44px]"
+              >
+                Cerrar
+              </button>
+              <button
+                type="submit"
+                disabled={savingProposalLimit || !selectedDeptIdForLimit}
+                className="px-5 py-2.5 rounded-xl bg-blue-800 text-white text-sm font-semibold hover:bg-blue-900 cursor-pointer disabled:opacity-50 min-h-[44px]"
+              >
+                {savingProposalLimit ? 'Guardando...' : 'Guardar cantidad'}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    ) : null;
 
   if (!session) {
     return (
@@ -147,7 +407,7 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
   if (!activeRound) {
     return (
       <div className="max-w-2xl mx-auto px-4 py-10">
-        <div className="bg-white border border-slate-200 rounded-2xl p-8 text-center space-y-3">
+        <div className="bg-white border border-slate-200 rounded-2xl p-8 text-center space-y-4">
           <Shield className="w-10 h-10 text-blue-800 mx-auto" />
           <p className="text-xs font-medium text-slate-500">
             {session.churchName} · Período {session.year}
@@ -161,7 +421,20 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
             En este momento no hay un cargo abierto para votar. Cuando el pastor inicie el
             siguiente cargo o departamento, aparecerá aquí automáticamente.
           </p>
+          {isAdmin && orderedDepartments.length > 0 && (
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={() => openProposalLimitModal()}
+                className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-slate-300 bg-white text-slate-800 text-sm font-semibold hover:bg-slate-50 cursor-pointer min-h-[44px]"
+              >
+                <SlidersHorizontal className="w-4 h-4 text-blue-800" />
+                Cantidad de propuestas por departamento
+              </button>
+            </div>
+          )}
         </div>
+        {proposalLimitModal}
       </div>
     );
   }
@@ -183,6 +456,8 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
     ? false
     : (activeRound.proposalsOpen ?? true);
   const votingStarted = activeRound.votingStarted ?? true;
+  const maxProposals = !activeRound.isTieBreaker ? (activeRound.maxProposals ?? null) : null;
+  const proposalLimitReached = maxProposals !== null && candidates.length >= maxProposals;
 
   const handleControlUpdate = async (updates: {
     proposalsOpen?: boolean;
@@ -232,6 +507,12 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
 
   const handlePropose = async (nameToPropose: string) => {
     if (!proposalsOpen || activeRound.status !== 'open' || activeRound.isTieBreaker) return;
+    if (proposalLimitReached) {
+      setVoteError(
+        `Se alcanzó el límite de ${maxProposals} propuestas configurado para este departamento.`
+      );
+      return;
+    }
     const clean = nameToPropose.trim();
     if (!clean) return;
     const duplicate = candidates.some(
@@ -302,6 +583,14 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
                 Elegir <strong className="font-mono">{activeRound.seats}</strong>{' '}
                 {activeRound.seats === 1 ? 'persona' : 'personas'}
               </span>
+            )}
+            {maxProposals !== null && (
+              <>
+                <span aria-hidden="true">·</span>
+                <span className="font-mono tabular-nums text-slate-700">
+                  Propuestas: {candidates.length}/{maxProposals}
+                </span>
+              </>
             )}
             {activeRound.isTieBreaker && (
               <>
@@ -493,6 +782,18 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
                     >
                       <Lock className="w-4 h-4" /> Cerrar votación ahora
                     </button>
+                    {!activeRound.isTieBreaker && orderedDepartments.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => openProposalLimitModal(activeRound.departmentId)}
+                        className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-300 bg-white text-slate-800 text-xs font-semibold hover:bg-slate-50 cursor-pointer min-h-[40px]"
+                      >
+                        <SlidersHorizontal className="w-4 h-4 text-blue-800" />
+                        {maxProposals !== null
+                          ? `Propuestas: máx. ${maxProposals}`
+                          : 'Cantidad de propuestas'}
+                      </button>
+                    )}
                   </>
                 ) : (
                   <>
@@ -615,12 +916,21 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
                 <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
                   <UserPlus className="w-4 h-4 text-blue-800" />
                   Proponer candidato(a)
+                  {maxProposals !== null && (
+                    <span className="text-xs font-mono font-semibold text-blue-900 tabular-nums">
+                      ({candidates.length} de {maxProposals})
+                    </span>
+                  )}
                 </h2>
                 <p className="text-xs text-slate-600 mt-0.5">
-                  Elige un nombre de la lista de miembros aptos o escribe tu propuesta manualmente.
+                  {maxProposals !== null
+                    ? `Se permiten hasta ${maxProposals} ${
+                        maxProposals === 1 ? 'propuesta' : 'propuestas'
+                      } para este departamento.`
+                    : 'Elige un nombre de la lista de miembros aptos o escribe tu propuesta manualmente.'}
                 </p>
               </div>
-              {eligibleMembers.length > 0 && (
+              {!proposalLimitReached && eligibleMembers.length > 0 && (
                 <button
                   type="button"
                   onClick={() => setShowSuggestions((prev) => !prev)}
@@ -633,58 +943,79 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
               )}
             </div>
 
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                void handlePropose(proposalInput);
-              }}
-              className="relative flex flex-col sm:flex-row gap-2.5"
-            >
-              <div className="relative flex-1">
-                <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  maxLength={140}
-                  value={proposalInput}
-                  onFocus={() => setShowSuggestions(true)}
-                  onChange={(e) => {
-                    setProposalInput(e.target.value);
-                    setShowSuggestions(true);
-                  }}
-                  placeholder="Busca en la lista de miembros o escribe un nombre..."
-                  className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-700 min-h-[48px]"
-                />
-                {showSuggestions && activeEligible.length > 0 && (
-                  <div className="absolute left-0 right-0 top-full mt-1.5 z-20 bg-white border border-slate-200 rounded-xl shadow-lg max-h-64 overflow-y-auto divide-y divide-slate-100">
-                    {activeEligible.map((m) => (
-                      <button
-                        key={m.id}
-                        type="button"
-                        onClick={() => handlePropose(m.name)}
-                        className="w-full text-left px-4 py-3 text-sm hover:bg-blue-50 flex items-center justify-between cursor-pointer min-h-[44px]"
-                      >
-                        <span className="font-medium text-slate-900">{m.name}</span>
-                        <span className="text-xs text-blue-800 font-semibold">Proponer</span>
-                      </button>
-                    ))}
-                  </div>
+            {proposalLimitReached ? (
+              <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-xs sm:text-sm text-amber-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <span>
+                  Se alcanzó el límite de <strong>{maxProposals}</strong>{' '}
+                  {maxProposals === 1 ? 'propuesta' : 'propuestas'} para este departamento.
+                </span>
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={() => openProposalLimitModal(activeRound.departmentId)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-amber-300 bg-white text-amber-950 text-xs font-semibold hover:bg-amber-100 cursor-pointer shrink-0 self-start sm:self-auto"
+                  >
+                    <SlidersHorizontal className="w-3.5 h-3.5" />
+                    Cambiar cantidad
+                  </button>
                 )}
               </div>
-              <button
-                type="submit"
-                disabled={proposing || !proposalInput.trim()}
-                className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-slate-900 text-white text-sm font-semibold hover:bg-slate-800 cursor-pointer disabled:opacity-50 min-h-[48px] whitespace-nowrap"
-              >
-                <Plus className="w-4 h-4" />
-                {proposing ? 'Agregando...' : 'Agregar propuesta'}
-              </button>
-            </form>
-            {showSuggestions && activeEligible.length === 0 && proposalInput.trim() && (
-              <p className="text-xs text-slate-600">
-                No coincide con un miembro pendiente de la lista. Presiona{' '}
-                <strong>Agregar propuesta</strong> para proponer a &ldquo;{proposalInput.trim()}
-                &rdquo;.
-              </p>
+            ) : (
+              <>
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    void handlePropose(proposalInput);
+                  }}
+                  className="relative flex flex-col sm:flex-row gap-2.5"
+                >
+                  <div className="relative flex-1">
+                    <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      maxLength={140}
+                      value={proposalInput}
+                      onFocus={() => setShowSuggestions(true)}
+                      onChange={(e) => {
+                        setProposalInput(e.target.value);
+                        setShowSuggestions(true);
+                      }}
+                      placeholder="Busca en la lista de miembros o escribe un nombre..."
+                      className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-700 min-h-[48px]"
+                    />
+                    {showSuggestions && activeEligible.length > 0 && (
+                      <div className="absolute left-0 right-0 top-full mt-1.5 z-20 bg-white border border-slate-200 rounded-xl shadow-lg max-h-64 overflow-y-auto divide-y divide-slate-100">
+                        {activeEligible.map((m) => (
+                          <button
+                            key={m.id}
+                            type="button"
+                            onClick={() => handlePropose(m.name)}
+                            className="w-full text-left px-4 py-3 text-sm hover:bg-blue-50 flex items-center justify-between cursor-pointer min-h-[44px]"
+                          >
+                            <span className="font-medium text-slate-900">{m.name}</span>
+                            <span className="text-xs text-blue-800 font-semibold">Proponer</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={proposing || !proposalInput.trim()}
+                    className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-slate-900 text-white text-sm font-semibold hover:bg-slate-800 cursor-pointer disabled:opacity-50 min-h-[48px] whitespace-nowrap"
+                  >
+                    <Plus className="w-4 h-4" />
+                    {proposing ? 'Agregando...' : 'Agregar propuesta'}
+                  </button>
+                </form>
+                {showSuggestions && activeEligible.length === 0 && proposalInput.trim() && (
+                  <p className="text-xs text-slate-600">
+                    No coincide con un miembro pendiente de la lista. Presiona{' '}
+                    <strong>Agregar propuesta</strong> para proponer a &ldquo;{proposalInput.trim()}
+                    &rdquo;.
+                  </p>
+                )}
+              </>
             )}
           </div>
         )}
@@ -1148,6 +1479,7 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
           )}
         </div>
       )}
+      {proposalLimitModal}
     </div>
   );
 };

@@ -396,6 +396,7 @@ export default function App() {
       activeRound.votingStarted === false ? '0' : '1',
       activeRound.observation ?? '',
       activeRound.observationsRevealed ? '1' : '0',
+      activeRound.maxProposals ?? '',
       activeRound.expectedVotersCount,
       receiptsCount,
       ballots.length,
@@ -590,6 +591,7 @@ export default function App() {
             isAdmin={isAdmin}
             adminUid={user?.uid ?? null}
             committeeMember={committeeMember}
+            departments={departments}
             activeRound={activeRound}
             candidates={activeCandidates}
             observations={activeObservations}

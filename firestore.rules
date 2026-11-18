@@ -88,7 +88,7 @@ service cloud.firestore {
         ])
         && data.keys().hasOnly([
           'sessionId', 'department', 'roleTitle', 'votingMode',
-          'leaderRoleTitle', 'membersRoleTitle', 'seats', 'order',
+          'leaderRoleTitle', 'membersRoleTitle', 'seats', 'maxProposals', 'order',
           'status', 'activeRoundId', 'leaderElectedName',
           'memberElectedNames', 'electedNames', 'createdAt', 'updatedAt'
         ])
@@ -99,6 +99,7 @@ service cloud.firestore {
         && (!('leaderRoleTitle' in data) || (data.leaderRoleTitle is string && data.leaderRoleTitle.size() <= 140))
         && (!('membersRoleTitle' in data) || (data.membersRoleTitle is string && data.membersRoleTitle.size() <= 140))
         && data.seats is int && data.seats >= 1 && data.seats <= 50
+        && (!('maxProposals' in data) || data.maxProposals == null || (data.maxProposals is int && data.maxProposals >= 1 && data.maxProposals <= 50))
         && data.order is int && data.order >= 0 && data.order <= 2000
         && data.status in ['pending', 'voting', 'paused', 'tie', 'completed']
         && (!('activeRoundId' in data) || data.activeRoundId == null || isValidId(data.activeRoundId))
@@ -134,7 +135,7 @@ service cloud.firestore {
         && data.keys().hasOnly([
           'sessionId', 'departmentId', 'departmentName', 'roleTitle',
           'votingMode', 'groupedStage', 'leaderRoleTitle', 'membersRoleTitle',
-          'totalGroupSeats', 'carryoverLeaderName', 'seats',
+          'totalGroupSeats', 'carryoverLeaderName', 'seats', 'maxProposals',
           'isTieBreaker', 'roundNumber', 'status', 'proposalsOpen',
           'votingStarted', 'observation', 'observationsRevealed', 'pastorVoteAllowed',
           'expectedVotersCount', 'votesCastCount', 'carryoverElectedNames',
@@ -151,6 +152,7 @@ service cloud.firestore {
         && (!('totalGroupSeats' in data) || (data.totalGroupSeats is int && data.totalGroupSeats >= 1 && data.totalGroupSeats <= 50))
         && (!('carryoverLeaderName' in data) || data.carryoverLeaderName == null || (data.carryoverLeaderName is string && data.carryoverLeaderName.size() <= 140))
         && data.seats is int && data.seats >= 1 && data.seats <= 50
+        && (!('maxProposals' in data) || data.maxProposals == null || (data.maxProposals is int && data.maxProposals >= 1 && data.maxProposals <= 50))
         && data.isTieBreaker is bool
         && data.roundNumber is int && data.roundNumber >= 1 && data.roundNumber <= 50
         && data.status in ['open', 'paused', 'closed']
@@ -242,7 +244,7 @@ service cloud.firestore {
         && data.keys().hasOnly([
           'sessionId', 'churchName', 'year', 'roundId', 'departmentName',
           'roleTitle', 'votingMode', 'groupedStage', 'leaderRoleTitle',
-          'membersRoleTitle', 'totalGroupSeats', 'seats', 'isTieBreaker',
+          'membersRoleTitle', 'totalGroupSeats', 'seats', 'maxProposals', 'isTieBreaker',
           'roundStatus', 'proposalsOpen', 'votingStarted', 'observation',
           'observationsRevealed', 'revealedObservations',
           'showResults', 'votesCastCount', 'expectedVotersCount',
@@ -260,6 +262,7 @@ service cloud.firestore {
         && (!('membersRoleTitle' in data) || (data.membersRoleTitle is string && data.membersRoleTitle.size() <= 140))
         && (!('totalGroupSeats' in data) || (data.totalGroupSeats is int && data.totalGroupSeats >= 1 && data.totalGroupSeats <= 50))
         && (!('seats' in data) || (data.seats is int && data.seats >= 1 && data.seats <= 50))
+        && (!('maxProposals' in data) || data.maxProposals == null || (data.maxProposals is int && data.maxProposals >= 1 && data.maxProposals <= 50))
         && (!('isTieBreaker' in data) || data.isTieBreaker is bool)
         && data.roundStatus in ['idle', 'open', 'paused', 'closed', 'tie']
         && (!('proposalsOpen' in data) || data.proposalsOpen is bool)

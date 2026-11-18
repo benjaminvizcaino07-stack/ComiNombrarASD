@@ -150,6 +150,9 @@
         "seats": {
           "type": "integer"
         },
+        "maxProposals": {
+          "type": "integer"
+        },
         "order": {
           "type": "integer"
         },
@@ -273,6 +276,9 @@
           "maxLength": 140
         },
         "seats": {
+          "type": "integer"
+        },
+        "maxProposals": {
           "type": "integer"
         },
         "isTieBreaker": {
@@ -503,6 +509,9 @@
         "seats": {
           "type": "integer"
         },
+        "maxProposals": {
+          "type": "integer"
+        },
         "isTieBreaker": {
           "type": "boolean"
         },
@@ -554,7 +563,7 @@
         "candidates",
         "updatedAt"
       ]
-    }
+    },
     "RoundObservation": {
       "title": "RoundObservation",
       "description": "Observación enviada por un integrante de la comisión o el pastor durante una ronda; visible a todos solo cuando el pastor las revela.",

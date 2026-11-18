@@ -47,6 +47,7 @@ export interface DepartmentPosition {
   leaderRoleTitle?: string;
   membersRoleTitle?: string;
   seats: number;
+  maxProposals?: number | null;
   order: number;
   status: DepartmentStatus;
   activeRoundId?: string | null;
@@ -79,6 +80,7 @@ export interface RoundData {
   totalGroupSeats?: number;
   carryoverLeaderName?: string | null;
   seats: number;
+  maxProposals?: number | null;
   isTieBreaker: boolean;
   roundNumber: number;
   status: RoundStatus;
@@ -157,6 +159,7 @@ export interface ProjectorState {
   membersRoleTitle?: string;
   totalGroupSeats?: number;
   seats?: number;
+  maxProposals?: number | null;
   isTieBreaker?: boolean;
   roundStatus: 'idle' | 'open' | 'paused' | 'closed' | 'tie';
   proposalsOpen?: boolean;
