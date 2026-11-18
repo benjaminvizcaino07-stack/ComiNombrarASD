@@ -185,29 +185,71 @@ export function exportFinalListExcel(
   XLSX.writeFile(wb, `Nombramientos_SDA_${safeChurch}_${year}.xlsx`);
 }
 
-export function exportFinalListPDF(
+const APP_LOGO_PATH = '/src/assets/images/nombramientos_sda_logo_1794997646492.jpg';
+
+async function loadLogoAsJpegDataUrl(url: string): Promise<string | null> {
+  if (typeof window === 'undefined' || typeof Image === 'undefined') return null;
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      try {
+        const size = 256;
+        const canvas = document.createElement('canvas');
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(null);
+          return;
+        }
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, size, size);
+        ctx.drawImage(img, 0, 0, size, size);
+        resolve(canvas.toDataURL('image/jpeg', 0.92));
+      } catch {
+        resolve(null);
+      }
+    };
+    img.onerror = () => resolve(null);
+    img.src = url;
+  });
+}
+
+export async function exportFinalListPDF(
   churchName: string,
   year: string,
   departments: DepartmentPosition[]
-): void {
+): Promise<void> {
   const groups = groupDepartmentsForReport(departments);
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'letter' });
+  const logoDataUrl = await loadLogoAsJpegDataUrl(APP_LOGO_PATH);
+
+  const textStartX = logoDataUrl ? 35 : 14;
+  if (logoDataUrl) {
+    doc.addImage(logoDataUrl, 'JPEG', 14, 11, 18, 18);
+  }
 
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(16);
+  doc.setFontSize(15);
   doc.setTextColor(15, 23, 42);
-  doc.text('INFORME DE COMISIÓN DE NOMBRAMIENTOS', 14, 18);
+  doc.text('INFORME DE COMISIÓN DE NOMBRAMIENTOS', textStartX, 17);
 
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(11);
-  doc.setTextColor(71, 85, 105);
-  doc.text(`${churchName} · Período ${year}`, 14, 25);
+  doc.setFontSize(10.5);
+  doc.setTextColor(51, 65, 85);
+  doc.text(`NOMBRAMIENTOS SDA · ${churchName} · Período ${year}`, textStartX, 23);
+
   doc.setFontSize(9);
+  doc.setTextColor(71, 85, 105);
   doc.text(
     `Iglesia Adventista del Séptimo Día · Generado el ${new Date().toLocaleDateString('es-ES')}`,
-    14,
-    31
+    textStartX,
+    28.5
   );
+
+  doc.setDrawColor(226, 232, 240);
+  doc.line(14, 33, 196, 33);
 
   const tableBody: (string | number)[][] = [];
   for (const group of groups) {
@@ -222,7 +264,7 @@ export function exportFinalListPDF(
   }
 
   autoTable(doc, {
-    startY: 36,
+    startY: 37,
     head: [['Departamento', 'Cargo', 'Personas Elegidas', 'Asignados']],
     body: tableBody,
     theme: 'grid',

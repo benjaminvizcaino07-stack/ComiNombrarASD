@@ -76,13 +76,21 @@ export const ProjectorView: React.FC<ProjectorViewProps> = ({ sessionId, project
     <div className="min-h-screen bg-slate-950 text-white flex flex-col justify-between p-6 sm:p-10 lg:p-14">
       {/* Top Header */}
       <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-6">
-        <div>
-          <p className="text-sm font-semibold text-blue-300 tracking-wide">
-            NOMBRAMIENTOS SDA · {state.churchName}
-          </p>
-          <h1 className="text-xl sm:text-2xl font-bold text-white mt-0.5">
-            Comisión de Nombramientos {state.year}
-          </h1>
+        <div className="flex items-center gap-4">
+          <img
+            src="/src/assets/images/nombramientos_sda_logo_1794997646492.jpg"
+            alt="Logo NOMBRAMIENTOS SDA"
+            referrerPolicy="no-referrer"
+            className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl object-contain bg-white p-1.5 shadow-sm shrink-0"
+          />
+          <div>
+            <p className="text-sm sm:text-base font-bold text-blue-300 tracking-wide">
+              NOMBRAMIENTOS SDA · {state.churchName}
+            </p>
+            <h1 className="text-xl sm:text-2xl font-bold text-white mt-0.5">
+              Comisión de Nombramientos {state.year}
+            </h1>
+          </div>
         </div>
 
         <div className="text-left sm:text-right">

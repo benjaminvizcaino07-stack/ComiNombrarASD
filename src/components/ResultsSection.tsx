@@ -549,22 +549,33 @@ export const ResultsSection: React.FC<ResultsSectionProps> = ({
       )}
 
       {/* FINAL LIST OF NOMINATIONS */}
-      <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
-        <div className="p-5 sm:p-6 border-b border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <p className="text-xs font-medium text-slate-500">
-              {session.churchName} · Período {session.year}
-            </p>
-            <h2 className="text-xl font-bold text-slate-900">
-              Lista Final de Nombramientos por Departamento
-            </h2>
+      <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden print:border-0 print:rounded-none">
+        <div className="p-5 sm:p-6 border-b border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-4 print:px-0 print:pt-0">
+          <div className="flex items-center gap-3.5">
+            <img
+              src="/src/assets/images/nombramientos_sda_logo_1794997646492.jpg"
+              alt="Logo NOMBRAMIENTOS SDA"
+              referrerPolicy="no-referrer"
+              className="w-12 h-12 sm:w-14 sm:h-14 rounded-xl object-contain bg-white border border-slate-200 p-1 shrink-0"
+            />
+            <div>
+              <p className="text-xs font-semibold text-blue-900 uppercase tracking-wide hidden print:block">
+                NOMBRAMIENTOS SDA · Iglesia Adventista del Séptimo Día
+              </p>
+              <p className="text-xs font-medium text-slate-500">
+                {session.churchName} · Período {session.year}
+              </p>
+              <h2 className="text-xl font-bold text-slate-900">
+                Lista Final de Nombramientos por Departamento
+              </h2>
+            </div>
           </div>
 
           {isAdmin && (
             <div className="no-print flex flex-wrap gap-2">
               <button
                 type="button"
-                onClick={() => exportFinalListPDF(session.churchName, session.year, departments)}
+                onClick={() => void exportFinalListPDF(session.churchName, session.year, departments)}
                 className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 text-white text-sm font-semibold hover:bg-slate-800 cursor-pointer min-h-[44px]"
               >
                 <Download className="w-4 h-4" />

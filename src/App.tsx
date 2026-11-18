@@ -455,20 +455,12 @@ export default function App() {
             onClick={() => setActiveSection(isCommitteeMode ? 'vote' : 'admin')}
             className="flex items-center gap-2.5 text-left cursor-pointer whitespace-nowrap shrink-0"
           >
-            <svg
-              className="w-7 h-7 text-blue-900 shrink-0"
-              viewBox="0 0 32 32"
-              fill="none"
-              aria-hidden="true"
-            >
-              <rect width="32" height="32" rx="8" fill="currentColor" />
-              <path
-                d="M16 7V25M10 13H22"
-                stroke="#FFFFFF"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-              />
-            </svg>
+            <img
+              src="/src/assets/images/nombramientos_sda_logo_1794997646492.jpg"
+              alt="Logo NOMBRAMIENTOS SDA"
+              referrerPolicy="no-referrer"
+              className="w-8 h-8 rounded-lg object-contain bg-white border border-slate-200 p-0.5 shrink-0"
+            />
             <span className="font-display font-extrabold text-base sm:text-lg tracking-tight text-slate-900">
               NOMBRAMIENTOS SDA
             </span>
