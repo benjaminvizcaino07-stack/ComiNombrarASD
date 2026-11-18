@@ -78,10 +78,10 @@ export const ProjectorView: React.FC<ProjectorViewProps> = ({ sessionId, project
       <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-6">
         <div className="flex items-center gap-4">
           <img
-            src="/src/assets/images/nombramientos_sda_logo_1794997646492.jpg"
+            src="/assets/aistudio/Icono_azul_de_nombramientos_SDA_0e21f0e4.png"
             alt="Logo NOMBRAMIENTOS SDA"
             referrerPolicy="no-referrer"
-            className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl object-contain bg-white p-1.5 shadow-sm shrink-0"
+            className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl object-contain shrink-0"
           />
           <div>
             <p className="text-sm sm:text-base font-bold text-blue-300 tracking-wide">

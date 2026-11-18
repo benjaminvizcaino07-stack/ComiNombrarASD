@@ -456,10 +456,10 @@ export default function App() {
             className="flex items-center gap-2.5 text-left cursor-pointer whitespace-nowrap shrink-0"
           >
             <img
-              src="/src/assets/images/nombramientos_sda_logo_1794997646492.jpg"
+              src="/assets/aistudio/Icono_azul_de_nombramientos_SDA_0e21f0e4.png"
               alt="Logo NOMBRAMIENTOS SDA"
               referrerPolicy="no-referrer"
-              className="w-8 h-8 rounded-lg object-contain bg-white border border-slate-200 p-0.5 shrink-0"
+              className="w-9 h-9 rounded-lg object-contain shrink-0"
             />
             <span className="font-display font-extrabold text-base sm:text-lg tracking-tight text-slate-900">
               NOMBRAMIENTOS SDA

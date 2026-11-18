@@ -553,10 +553,10 @@ export const ResultsSection: React.FC<ResultsSectionProps> = ({
         <div className="p-5 sm:p-6 border-b border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-4 print:px-0 print:pt-0">
           <div className="flex items-center gap-3.5">
             <img
-              src="/src/assets/images/nombramientos_sda_logo_1794997646492.jpg"
+              src="/assets/aistudio/Icono_azul_de_nombramientos_SDA_0e21f0e4.png"
               alt="Logo NOMBRAMIENTOS SDA"
               referrerPolicy="no-referrer"
-              className="w-12 h-12 sm:w-14 sm:h-14 rounded-xl object-contain bg-white border border-slate-200 p-1 shrink-0"
+              className="w-12 h-12 sm:w-14 sm:h-14 rounded-xl object-contain shrink-0"
             />
             <div>
               <p className="text-xs font-semibold text-blue-900 uppercase tracking-wide hidden print:block">

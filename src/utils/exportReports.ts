@@ -185,9 +185,9 @@ export function exportFinalListExcel(
   XLSX.writeFile(wb, `Nombramientos_SDA_${safeChurch}_${year}.xlsx`);
 }
 
-const APP_LOGO_PATH = '/src/assets/images/nombramientos_sda_logo_1794997646492.jpg';
+const APP_LOGO_PATH = '/assets/aistudio/Icono_azul_de_nombramientos_SDA_0e21f0e4.png';
 
-async function loadLogoAsJpegDataUrl(url: string): Promise<string | null> {
+async function loadLogoAsPngDataUrl(url: string): Promise<string | null> {
   if (typeof window === 'undefined' || typeof Image === 'undefined') return null;
   return new Promise((resolve) => {
     const img = new Image();
@@ -203,10 +203,8 @@ async function loadLogoAsJpegDataUrl(url: string): Promise<string | null> {
           resolve(null);
           return;
         }
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, size, size);
         ctx.drawImage(img, 0, 0, size, size);
-        resolve(canvas.toDataURL('image/jpeg', 0.92));
+        resolve(canvas.toDataURL('image/png'));
       } catch {
         resolve(null);
       }
@@ -223,11 +221,11 @@ export async function exportFinalListPDF(
 ): Promise<void> {
   const groups = groupDepartmentsForReport(departments);
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'letter' });
-  const logoDataUrl = await loadLogoAsJpegDataUrl(APP_LOGO_PATH);
+  const logoDataUrl = await loadLogoAsPngDataUrl(APP_LOGO_PATH);
 
   const textStartX = logoDataUrl ? 35 : 14;
   if (logoDataUrl) {
-    doc.addImage(logoDataUrl, 'JPEG', 14, 11, 18, 18);
+    doc.addImage(logoDataUrl, 'PNG', 14, 11, 18, 18);
   }
 
   doc.setFont('helvetica', 'bold');
