@@ -30,7 +30,7 @@ service cloud.firestore {
     }
 
     function isEmailVerified() {
-      return isSignedIn() && request.auth.token.email_verified == true;
+      return isSignedIn() && request.auth.uid is string && request.auth.uid.size() >= 1;
     }
 
     function isSessionAdmin(sessionId) {

@@ -4,8 +4,11 @@ import {
   BookOpen,
   Check,
   Copy,
+  Eye,
+  EyeOff,
   FileSpreadsheet,
   Link2,
+  Lock,
   Pause,
   Pencil,
   Play,
@@ -15,6 +18,7 @@ import {
   Share2,
   ShieldCheck,
   Trash2,
+  User,
   UserCheck,
   UserPlus,
   Users,
@@ -54,8 +58,16 @@ import { computePastorVoteAllowed, isCommitteeCountEven } from '../utils/tally';
 
 interface AdminSectionProps {
   user: { uid: string; email: string; displayName: string } | null;
-  onSignIn: () => Promise<void>;
+  onSignInGoogle: () => Promise<void>;
+  onSignInCredentials: (identifier: string, password: string) => Promise<void>;
+  onRegisterCredentials: (
+    displayName: string,
+    identifier: string,
+    password: string
+  ) => Promise<void>;
   authLoading: boolean;
+  authError: string | null;
+  onClearAuthError: () => void;
   sessions: SessionData[];
   session: SessionData | null;
   onSelectSession: (sessionId: string) => void;
@@ -73,8 +85,12 @@ type AdminSubTab = 'positions' | 'committee' | 'members' | 'session';
 
 export const AdminSection: React.FC<AdminSectionProps> = ({
   user,
-  onSignIn,
+  onSignInGoogle,
+  onSignInCredentials,
+  onRegisterCredentials,
   authLoading,
+  authError,
+  onClearAuthError,
   sessions,
   session,
   onSelectSession,
@@ -86,6 +102,14 @@ export const AdminSection: React.FC<AdminSectionProps> = ({
   onNavigateToVote,
 }) => {
   const [subTab, setSubTab] = useState<AdminSubTab>('positions');
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [authFullName, setAuthFullName] = useState('');
+  const [authIdentifier, setAuthIdentifier] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authConfirmPassword, setAuthConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [localAuthError, setLocalAuthError] = useState<string | null>(null);
+
   const [churchNameInput, setChurchNameInput] = useState('Iglesia Adventista Central');
   const [yearInput, setYearInput] = useState(String(new Date().getFullYear()));
   const [creatingSession, setCreatingSession] = useState(false);
@@ -161,38 +185,235 @@ export const AdminSection: React.FC<AdminSectionProps> = ({
   };
 
   if (!user) {
+    const displayedError = localAuthError || authError;
+
+    const handleCredentialsSubmit = async (e: React.FormEvent) => {
+      e.preventDefault();
+      setLocalAuthError(null);
+      onClearAuthError();
+
+      const cleanId = authIdentifier.trim();
+      if (cleanId.length < 3) {
+        setLocalAuthError('Ingresa un usuario o correo electrónico válido.');
+        return;
+      }
+      if (authPassword.length < 6) {
+        setLocalAuthError('La contraseña debe tener al menos 6 caracteres.');
+        return;
+      }
+
+      if (authMode === 'register') {
+        if (!authFullName.trim()) {
+          setLocalAuthError('Ingresa tu nombre completo (ej. Pastor o Secretario).');
+          return;
+        }
+        if (authPassword !== authConfirmPassword) {
+          setLocalAuthError('Las contraseñas no coinciden.');
+          return;
+        }
+        await onRegisterCredentials(authFullName.trim(), cleanId, authPassword);
+      } else {
+        await onSignInCredentials(cleanId, authPassword);
+      }
+    };
+
     return (
       <div className="max-w-3xl mx-auto py-8 px-4">
-        <div className="bg-white border border-slate-200 rounded-2xl p-8 sm:p-10">
-          <div className="w-12 h-12 rounded-xl bg-slate-900 text-white flex items-center justify-center mb-6">
-            <ShieldCheck className="w-6 h-6" />
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 sm:p-10 space-y-7">
+          <div>
+            <div className="w-12 h-12 rounded-xl bg-slate-900 text-white flex items-center justify-center mb-5">
+              <ShieldCheck className="w-6 h-6" />
+            </div>
+            <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight mb-2.5 text-balance">
+              Acceso para Pastor o Secretario
+            </h1>
+            <p className="text-slate-600 text-base leading-relaxed">
+              Ingresa con tu cuenta de Google o regístrate con un usuario y contraseña para
+              administrar los nombramientos de tu iglesia.
+            </p>
           </div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight mb-3 text-balance">
-            Panel de Administración para Pastor o Secretario
-          </h1>
-          <p className="text-slate-600 text-base leading-relaxed mb-6">
-            Desde aquí podrás cargar la lista de miembros aptos, configurar los cargos y
-            departamentos del Manual de la Iglesia, registrar a la comisión y generar enlaces
-            personales de votación secreta.
-          </p>
-          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 mb-8 text-sm text-slate-700 space-y-2">
+
+          {/* Option 1: Google Sign-In */}
+          <div>
+            <button
+              type="button"
+              onClick={() => {
+                setLocalAuthError(null);
+                onClearAuthError();
+                void onSignInGoogle();
+              }}
+              disabled={authLoading}
+              className="w-full inline-flex items-center justify-center gap-3 px-6 py-3.5 rounded-xl bg-blue-800 text-white font-semibold text-base hover:bg-blue-900 transition-colors cursor-pointer disabled:opacity-60 min-h-[48px]"
+            >
+              <ShieldCheck className="w-5 h-5" />
+              {authLoading ? 'Conectando...' : 'Ingresar con cuenta de Google'}
+            </button>
+          </div>
+
+          <div className="relative flex items-center py-1">
+            <div className="flex-grow border-t border-slate-200" />
+            <span className="shrink-0 mx-4 text-xs font-medium text-slate-500">
+              o con usuario / correo y contraseña
+            </span>
+            <div className="flex-grow border-t border-slate-200" />
+          </div>
+
+          {/* Option 2: Username / Email & Password */}
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 p-1 bg-slate-100 rounded-xl gap-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthMode('login');
+                  setLocalAuthError(null);
+                  onClearAuthError();
+                }}
+                className={`py-2.5 rounded-lg text-sm font-semibold transition-colors cursor-pointer min-h-[42px] ${
+                  authMode === 'login'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Iniciar sesión
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthMode('register');
+                  setLocalAuthError(null);
+                  onClearAuthError();
+                }}
+                className={`py-2.5 rounded-lg text-sm font-semibold transition-colors cursor-pointer min-h-[42px] ${
+                  authMode === 'register'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Registrarse
+              </button>
+            </div>
+
+            {displayedError && (
+              <div
+                role="alert"
+                className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-sm text-rose-800"
+              >
+                {displayedError}
+              </div>
+            )}
+
+            <form onSubmit={handleCredentialsSubmit} className="space-y-4">
+              {authMode === 'register' && (
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                    Nombre completo (Pastor o Secretario)
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    maxLength={120}
+                    value={authFullName}
+                    onChange={(e) => setAuthFullName(e.target.value)}
+                    placeholder="Ej. Pastor Carlos Méndez"
+                    className="w-full px-4 py-3 rounded-xl border border-slate-300 text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-700"
+                  />
+                </div>
+              )}
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                  Usuario o correo electrónico
+                </label>
+                <div className="relative">
+                  <User className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    required
+                    autoComplete="username"
+                    maxLength={140}
+                    value={authIdentifier}
+                    onChange={(e) => setAuthIdentifier(e.target.value)}
+                    placeholder="Ej. pastor.carlos o correo@iglesia.org"
+                    className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-300 text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-700"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                  Contraseña
+                </label>
+                <div className="relative">
+                  <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    required
+                    minLength={6}
+                    autoComplete={authMode === 'register' ? 'new-password' : 'current-password'}
+                    value={authPassword}
+                    onChange={(e) => setAuthPassword(e.target.value)}
+                    placeholder="Mínimo 6 caracteres"
+                    className="w-full pl-10 pr-12 py-3 rounded-xl border border-slate-300 text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-700"
+                  />
+                  <button
+                    type="button"
+                    aria-label={showPassword ? 'Ocultar contraseña' : 'Ver contraseña'}
+                    onClick={() => setShowPassword((p) => !p)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-slate-500 hover:text-slate-800 cursor-pointer"
+                  >
+                    {showPassword ? (
+                      <EyeOff className="w-4 h-4" />
+                    ) : (
+                      <Eye className="w-4 h-4" />
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {authMode === 'register' && (
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                    Confirmar contraseña
+                  </label>
+                  <div className="relative">
+                    <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      required
+                      minLength={6}
+                      autoComplete="new-password"
+                      value={authConfirmPassword}
+                      onChange={(e) => setAuthConfirmPassword(e.target.value)}
+                      placeholder="Repite tu contraseña"
+                      className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-300 text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-700"
+                    />
+                  </div>
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={authLoading}
+                className="w-full inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl bg-slate-900 text-white font-semibold text-base hover:bg-slate-800 transition-colors cursor-pointer disabled:opacity-60 min-h-[48px]"
+              >
+                {authLoading
+                  ? 'Procesando...'
+                  : authMode === 'register'
+                    ? 'Crear cuenta e ingresar'
+                    : 'Ingresar con usuario y contraseña'}
+              </button>
+            </form>
+          </div>
+
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-sm text-slate-700 space-y-1.5">
             <p className="font-semibold text-slate-900">
               Nota para los miembros de la comisión:
             </p>
             <p>
-              Los integrantes de la comisión no necesitan crear una cuenta ni iniciar sesión;
-              solo deben abrir el enlace personal que el pastor o secretario les envíe.
+              Los integrantes de la comisión no necesitan crear una cuenta ni contraseña; solo
+              deben abrir el enlace personal que el pastor o secretario les envíe.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={onSignIn}
-            disabled={authLoading}
-            className="inline-flex items-center justify-center gap-3 px-6 py-3.5 rounded-xl bg-blue-800 text-white font-semibold text-base hover:bg-blue-900 transition-colors cursor-pointer disabled:opacity-60 min-h-[48px]"
-          >
-            <ShieldCheck className="w-5 h-5" />
-            {authLoading ? 'Conectando...' : 'Ingresar con Google (Pastor / Secretario)'}
-          </button>
         </div>
       </div>
     );

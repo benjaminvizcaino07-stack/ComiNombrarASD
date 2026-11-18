@@ -1,12 +1,18 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { collection, doc, onSnapshot, query, where } from 'firebase/firestore';
 import { BarChart3, CheckSquare, LogOut, Settings, ShieldCheck } from 'lucide-react';
 import { AdminSection } from './components/AdminSection';
 import { ProjectorView } from './components/ProjectorView';
 import { ResultsSection } from './components/ResultsSection';
 import { VoteSection } from './components/VoteSection';
-import { auth, db, googleProvider, handleFirestoreError, OperationType, testConnection } from './firebase';
+import { auth, db, handleFirestoreError, OperationType, testConnection } from './firebase';
+import {
+  mapAuthErrorMessage,
+  registerWithCredentials,
+  signInWithCredentials,
+  signInWithGoogle,
+} from './services/authService';
 import { syncRoundAndProjector } from './services/nominationService';
 import {
   AppSection,
@@ -60,6 +66,7 @@ export default function App() {
   );
   const [authReady, setAuthReady] = useState(false);
   const [authLoading, setAuthLoading] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
 
   const [ownedSessions, setOwnedSessions] = useState<SessionData[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(
@@ -83,11 +90,12 @@ export default function App() {
   useEffect(() => {
     void testConnection();
     const unsub = onAuthStateChanged(auth, (fbUser) => {
-      if (fbUser && fbUser.email) {
+      if (fbUser) {
+        const fallbackEmail = fbUser.email || `${fbUser.uid}@nombramientos.sda`;
         setUser({
           uid: fbUser.uid,
-          email: fbUser.email,
-          displayName: fbUser.displayName || fbUser.email,
+          email: fallbackEmail,
+          displayName: fbUser.displayName || fallbackEmail,
         });
       } else {
         setUser(null);
@@ -376,10 +384,41 @@ export default function App() {
     receiptsCount,
   ]);
 
-  const handleSignIn = async () => {
+  const handleGoogleSignIn = async () => {
     setAuthLoading(true);
+    setAuthError(null);
     try {
-      await signInWithPopup(auth, googleProvider);
+      await signInWithGoogle();
+    } catch (err) {
+      setAuthError(mapAuthErrorMessage(err));
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleCredentialsSignIn = async (identifier: string, password: string) => {
+    setAuthLoading(true);
+    setAuthError(null);
+    try {
+      await signInWithCredentials(identifier, password);
+    } catch (err) {
+      setAuthError(mapAuthErrorMessage(err));
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleCredentialsRegister = async (
+    displayName: string,
+    identifier: string,
+    password: string
+  ) => {
+    setAuthLoading(true);
+    setAuthError(null);
+    try {
+      await registerWithCredentials(displayName, identifier, password);
+    } catch (err) {
+      setAuthError(mapAuthErrorMessage(err));
     } finally {
       setAuthLoading(false);
     }
@@ -465,8 +504,7 @@ export default function App() {
             ) : (
               <button
                 type="button"
-                onClick={handleSignIn}
-                disabled={authLoading}
+                onClick={() => setActiveSection('admin')}
                 className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-900 text-white text-xs font-semibold hover:bg-slate-800 cursor-pointer whitespace-nowrap shrink-0 min-h-[40px]"
               >
                 <ShieldCheck className="w-4 h-4" />
@@ -482,8 +520,12 @@ export default function App() {
         {activeSection === 'admin' && (
           <AdminSection
             user={user}
-            onSignIn={handleSignIn}
+            onSignInGoogle={handleGoogleSignIn}
+            onSignInCredentials={handleCredentialsSignIn}
+            onRegisterCredentials={handleCredentialsRegister}
             authLoading={authLoading}
+            authError={authError}
+            onClearAuthError={() => setAuthError(null)}
             sessions={ownedSessions}
             session={isAdmin ? session : null}
             onSelectSession={handleSelectSession}
