@@ -3,6 +3,8 @@ import {
   CheckCircle2,
   Eye,
   EyeOff,
+  FlaskConical,
+  ListOrdered,
   Lock,
   MessageSquareText,
   Minus,
@@ -23,12 +25,16 @@ import {
 import {
   castSecretVote,
   deleteRoundObservation,
+  isTestPracticeRound,
   proposeCandidate,
   removeCandidate,
   reopenRound,
   setObservationsRevealed,
   setRoundPauseState,
   setSessionLifecycleStatus,
+  sortDepartmentsGroupedFirst,
+  startOrRestartFormalVoting,
+  startTestVotingRound,
   submitRoundObservation,
   syncRoundAndProjector,
   updateDepartmentMaxProposals,
@@ -51,13 +57,16 @@ interface VoteSectionProps {
   isAdmin: boolean;
   adminUid: string | null;
   committeeMember: CommitteeMember | null;
+  committee?: CommitteeMember[];
   departments: DepartmentPosition[];
   activeRound: RoundData | null;
+  allRounds?: RoundData[];
   candidates: CandidateData[];
   observations: RoundObservation[];
   eligibleMembers: EligibleMember[];
   hasVotedCurrentRound: boolean;
   receiptsCount: number;
+  receiptIds?: string[];
   ballots: SecretBallot[];
   onGoToResults: () => void;
 }
@@ -67,13 +76,16 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
   isAdmin,
   adminUid,
   committeeMember,
+  committee = [],
   departments,
   activeRound,
+  allRounds = [],
   candidates,
   observations,
   eligibleMembers,
   hasVotedCurrentRound,
   receiptsCount,
+  receiptIds = [],
   ballots,
   onGoToResults,
 }) => {
@@ -98,6 +110,10 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
   const [limitValue, setLimitValue] = useState<number>(3);
   const [savingProposalLimit, setSavingProposalLimit] = useState(false);
   const [proposalLimitNotice, setProposalLimitNotice] = useState<string | null>(null);
+  const [startingTestVote, setStartingTestVote] = useState(false);
+  const [startingFormalVote, setStartingFormalVote] = useState(false);
+  const [showTestConfirmModal, setShowTestConfirmModal] = useState(false);
+  const [showRestartFormalModal, setShowRestartFormalModal] = useState(false);
 
   useEffect(() => {
     setObservationDraft(activeRound?.observation ?? '');
@@ -131,6 +147,93 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
     () => [...departments].sort((a, b) => a.order - b.order),
     [departments]
   );
+
+  const groupedFirstDepartments = useMemo(
+    () => sortDepartmentsGroupedFirst(departments),
+    [departments]
+  );
+
+  const groupedDepartmentsCount = useMemo(
+    () => departments.filter((d) => d.votingMode === 'grouped' && d.seats >= 2).length,
+    [departments]
+  );
+
+  const hasExistingDepartmentProgress = useMemo(
+    () => departments.some((d) => d.status !== 'pending'),
+    [departments]
+  );
+
+  const enabledCommittee = useMemo(
+    () => committee.filter((m) => m.enabled),
+    [committee]
+  );
+
+  const isTestRound = isTestPracticeRound(activeRound);
+
+  const nextTestRoundNumber = useMemo(
+    () => Math.min(50, allRounds.filter((r) => isTestPracticeRound(r)).length + 1),
+    [allRounds]
+  );
+
+  const handleLaunchTestVoting = async (skipConfirm = false) => {
+    if (!session || !isAdmin) return;
+    if (!skipConfirm && activeRound && !isTestRound && activeRound.status === 'open') {
+      setShowTestConfirmModal(true);
+      return;
+    }
+    setStartingTestVote(true);
+    setVoteError(null);
+    setShowTestConfirmModal(false);
+    try {
+      await startTestVotingRound(session, nextTestRoundNumber);
+    } catch {
+      setVoteError('No se pudo iniciar la votación de prueba. Intenta nuevamente.');
+    } finally {
+      setStartingTestVote(false);
+    }
+  };
+
+  const executeFormalVotingStart = async (resetExistingDepartments: boolean) => {
+    if (!session || !isAdmin) return;
+    setStartingFormalVote(true);
+    setVoteError(null);
+    try {
+      const res = await startOrRestartFormalVoting({
+        session,
+        departments,
+        allRounds,
+        resetExistingDepartments,
+      });
+      if (!res.firstDepartment) {
+        setVoteError(
+          'Primero agrega al menos un departamento o cargo en la sección Administrar antes de iniciar la votación formal.'
+        );
+      }
+      setShowRestartFormalModal(false);
+    } catch {
+      setVoteError('No se pudo iniciar o reiniciar la votación formal. Intenta nuevamente.');
+    } finally {
+      setStartingFormalVote(false);
+    }
+  };
+
+  const handleRequestFormalVoting = () => {
+    if (!session || !isAdmin) return;
+    if (groupedFirstDepartments.length === 0) {
+      setVoteError(
+        'Primero agrega al menos un departamento o cargo en la sección Administrar antes de iniciar la votación formal.'
+      );
+      return;
+    }
+    if (
+      hasExistingDepartmentProgress ||
+      (activeRound && !isTestRound && activeRound.status === 'open')
+    ) {
+      setShowRestartFormalModal(true);
+      return;
+    }
+    void executeFormalVotingStart(false);
+  };
 
   const memberProposalsEnabled = activeRound
     ? (activeRound.memberProposalsEnabled ?? session?.allowMemberProposals ?? true)
@@ -401,6 +504,127 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
       </div>
     ) : null;
 
+  const testConfirmModal =
+    showTestConfirmModal && isAdmin && session ? (
+      <div className="fixed inset-0 z-50 bg-slate-950/50 backdrop-blur-xs flex items-center justify-center p-4">
+        <div className="bg-white border border-slate-200 rounded-2xl max-w-md w-full overflow-hidden">
+          <div className="p-5 border-b border-slate-200 flex items-center justify-between gap-3">
+            <h3 className="text-lg font-bold text-slate-900">Iniciar votación de prueba</h3>
+            <button
+              type="button"
+              onClick={() => setShowTestConfirmModal(false)}
+              className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+          <div className="p-5 space-y-4">
+            <p className="text-sm text-slate-700 leading-relaxed">
+              Hay una votación formal abierta para <strong>{activeRound?.roleTitle}</strong>. Si
+              cambias ahora a la votación de prueba, los resultados parciales de esta ronda formal no
+              se cerrarán automáticamente. ¿Deseas abrir la votación de prueba ahora?
+            </p>
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowTestConfirmModal(false)}
+                className="px-4 py-2.5 rounded-xl border border-slate-300 bg-white text-slate-700 text-sm font-semibold hover:bg-slate-50 cursor-pointer min-h-[44px]"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={startingTestVote}
+                onClick={() => void handleLaunchTestVoting(true)}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-amber-700 text-white text-sm font-semibold hover:bg-amber-800 cursor-pointer disabled:opacity-50 min-h-[44px]"
+              >
+                <FlaskConical className="w-4 h-4" />
+                {startingTestVote ? 'Iniciando...' : 'Sí, iniciar prueba'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    ) : null;
+
+  const restartFormalModal =
+    showRestartFormalModal && isAdmin && session ? (
+      <div className="fixed inset-0 z-50 bg-slate-950/50 backdrop-blur-xs flex items-center justify-center p-4">
+        <div className="bg-white border border-slate-200 rounded-2xl max-w-lg w-full overflow-hidden">
+          <div className="p-5 border-b border-slate-200 flex items-center justify-between gap-3">
+            <div>
+              <h3 className="text-lg font-bold text-slate-900">Reiniciar votación formal</h3>
+              <p className="text-xs text-slate-600 mt-0.5">
+                Ordenará los cargos colocando primero los departamentos agrupados.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowRestartFormalModal(false)}
+              className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+          <div className="p-5 space-y-4">
+            <div className="p-3.5 rounded-xl bg-blue-50 border border-blue-200 text-xs sm:text-sm text-blue-950 space-y-1.5">
+              <p>
+                {groupedDepartmentsCount > 0 ? (
+                  <>
+                    Se detectaron <strong>{groupedDepartmentsCount}</strong>{' '}
+                    {groupedDepartmentsCount === 1
+                      ? 'departamento agrupado'
+                      : 'departamentos agrupados'}
+                    . Se colocarán <strong>en primer lugar</strong> antes de los cargos
+                    individuales.
+                  </>
+                ) : (
+                  'No hay departamentos agrupados seleccionados; se ordenarán los cargos configurados.'
+                )}
+              </p>
+              {groupedFirstDepartments[0] && (
+                <p>
+                  Primer cargo a abrir:{' '}
+                  <strong>
+                    {groupedFirstDepartments[0].department} —{' '}
+                    {groupedFirstDepartments[0].roleTitle}
+                  </strong>
+                </p>
+              )}
+            </div>
+
+            {hasExistingDepartmentProgress && (
+              <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-xs sm:text-sm text-amber-950">
+                Al reiniciar la votación formal desde el principio, los departamentos con avance
+                previo volverán a estado <strong>pendiente</strong> para iniciar limpiamente desde
+                la Ronda 1 del primer cargo.
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                disabled={startingFormalVote}
+                onClick={() => setShowRestartFormalModal(false)}
+                className="px-4 py-2.5 rounded-xl border border-slate-300 bg-white text-slate-700 text-sm font-semibold hover:bg-slate-50 cursor-pointer min-h-[44px]"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={startingFormalVote}
+                onClick={() => void executeFormalVotingStart(true)}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-800 text-white text-sm font-semibold hover:bg-blue-900 cursor-pointer disabled:opacity-50 min-h-[44px]"
+              >
+                <ListOrdered className="w-4 h-4" />
+                {startingFormalVote ? 'Reiniciando...' : 'Confirmar y reiniciar votación'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    ) : null;
+
   if (!session) {
     return (
       <div className="max-w-2xl mx-auto px-4 py-12 text-center">
@@ -514,7 +738,56 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
             siguiente cargo o departamento, aparecerá aquí automáticamente.
           </p>
           {isAdmin && (
-            <div className="pt-3 border-t border-slate-100 space-y-3">
+            <div className="pt-3 border-t border-slate-100 space-y-4">
+              {voteError && (
+                <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs sm:text-sm text-rose-800 text-left">
+                  {voteError}
+                </div>
+              )}
+
+              <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-3">
+                <p className="text-xs font-bold uppercase tracking-wide text-slate-700">
+                  Acciones de inicio (Pastor / Secretario)
+                </p>
+                <div className="flex flex-wrap items-center justify-center gap-2.5">
+                  <button
+                    type="button"
+                    disabled={startingTestVote || startingFormalVote}
+                    onClick={() => void handleLaunchTestVoting(true)}
+                    className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-amber-300 bg-amber-50 text-amber-950 text-sm font-semibold hover:bg-amber-100 cursor-pointer disabled:opacity-50 min-h-[44px]"
+                  >
+                    <FlaskConical className="w-4 h-4 text-amber-800" />
+                    {startingTestVote ? 'Abriendo prueba...' : 'Iniciar votación de prueba'}
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={startingFormalVote || startingTestVote}
+                    onClick={handleRequestFormalVoting}
+                    className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-blue-800 text-white text-sm font-semibold hover:bg-blue-900 cursor-pointer disabled:opacity-50 min-h-[44px]"
+                  >
+                    <ListOrdered className="w-4 h-4" />
+                    {startingFormalVote
+                      ? 'Iniciando formal...'
+                      : hasExistingDepartmentProgress
+                        ? 'Reiniciar votación formal'
+                        : 'Iniciar votación formal'}
+                  </button>
+                </div>
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  Usa la <strong>votación de prueba</strong> para verificar con los miembros que
+                  todos los enlaces votan bien. Al iniciar o reiniciar la{' '}
+                  <strong>votación formal</strong>, los departamentos agrupados (si se eligieron)
+                  se colocan siempre en primer lugar.
+                </p>
+                {enabledCommittee.length === 0 && (
+                  <p className="text-xs text-amber-800">
+                    Nota: Aún no hay miembros habilitados en la comisión (puedes agregarlos en
+                    Administrar o ensayar primero con el voto del pastor).
+                  </p>
+                )}
+              </div>
+
               <div className="flex flex-wrap items-center justify-center gap-2">
                 {orderedDepartments.length > 0 && (
                   <button
@@ -620,6 +893,8 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
           )}
         </div>
         {proposalLimitModal}
+        {testConfirmModal}
+        {restartFormalModal}
       </div>
     );
   }
@@ -759,6 +1034,23 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-6 space-y-5 pb-24 sm:pb-10">
+      {/* Test Round Banner (Visible to Admin and Committee) */}
+      {isTestRound && (
+        <div className="bg-amber-50 border-2 border-amber-300 rounded-2xl p-4 sm:p-5 flex items-start gap-3">
+          <FlaskConical className="w-5 h-5 text-amber-800 shrink-0 mt-0.5" />
+          <div className="space-y-1 text-sm text-amber-950">
+            <p className="font-bold uppercase tracking-wide text-xs text-amber-900">
+              Votación de prueba · Ensayo técnico (sin validez oficial)
+            </p>
+            <p className="leading-relaxed">
+              {isAdmin
+                ? 'Esta ronda es solo para comprobar que todos los miembros de la comisión reciben la papeleta y pueden votar correctamente. No afecta ningún cargo ni los resultados reales.'
+                : 'Selecciona cualquier opción de prueba y presiona "Emitir Voto Secreto" para confirmar que tu enlace funciona correctamente. Esta prueba no cuenta para los cargos reales.'}
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Voter Identity Header */}
       <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -1047,6 +1339,36 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
               )}
             </div>
 
+            <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                disabled={startingTestVote || startingFormalVote}
+                onClick={() => void handleLaunchTestVoting(false)}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-amber-300 bg-amber-50 text-amber-950 text-xs font-semibold hover:bg-amber-100 cursor-pointer disabled:opacity-50 min-h-[40px]"
+              >
+                <FlaskConical className="w-3.5 h-3.5 text-amber-800" />
+                {startingTestVote
+                  ? 'Abriendo prueba...'
+                  : isTestRound
+                    ? 'Repetir votación de prueba'
+                    : 'Votación de prueba (comisión)'}
+              </button>
+
+              <button
+                type="button"
+                disabled={startingFormalVote || startingTestVote}
+                onClick={handleRequestFormalVoting}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-800 text-white text-xs font-semibold hover:bg-blue-900 cursor-pointer disabled:opacity-50 min-h-[40px]"
+              >
+                <ListOrdered className="w-3.5 h-3.5" />
+                {startingFormalVote
+                  ? 'Iniciando formal...'
+                  : isTestRound && !hasExistingDepartmentProgress
+                    ? 'Iniciar votación formal (agrupados primero)'
+                    : 'Reiniciar votación formal (agrupados primero)'}
+              </button>
+            </div>
+
             {activeRound.status !== 'closed' && (
               <div className="pt-2 border-t border-slate-100 space-y-2">
                 <p className="text-xs font-semibold text-slate-600">
@@ -1164,6 +1486,78 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
           </div>
         )}
       </div>
+
+      {/* Live Test Voter Verification Checklist (Admin-only during test round) */}
+      {isAdmin && isTestRound && (
+        <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                <Users className="w-4 h-4 text-blue-800" />
+                Verificación de votantes en la prueba
+              </h2>
+              <p className="text-xs text-slate-600 mt-0.5">
+                Comprueba en tiempo real qué enlaces ya enviaron su voto de prueba (la opción elegida
+                sigue siendo secreta).
+              </p>
+            </div>
+            <span className="font-mono text-xs font-bold text-blue-900 tabular-nums">
+              {receiptsCount} / {activeRound.expectedVotersCount} listos
+            </span>
+          </div>
+
+          {enabledCommittee.length === 0 && !activeRound.pastorVoteAllowed ? (
+            <p className="text-xs text-slate-500 py-2">
+              No hay votantes habilitados registrados en la comisión todavía.
+            </p>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {enabledCommittee.map((member) => {
+                const verified = receiptIds.includes(member.id);
+                return (
+                  <div
+                    key={member.id}
+                    className={`px-3.5 py-2.5 rounded-xl border flex items-center justify-between gap-2 text-xs ${
+                      verified
+                        ? 'bg-emerald-50 border-emerald-200 text-emerald-950'
+                        : 'bg-slate-50 border-slate-200 text-slate-700'
+                    }`}
+                  >
+                    <span className="font-semibold truncate">{member.name}</span>
+                    <span
+                      className={`font-bold shrink-0 ${
+                        verified ? 'text-emerald-800' : 'text-slate-500'
+                      }`}
+                    >
+                      {verified ? 'Voto recibido ✓' : 'Pendiente'}
+                    </span>
+                  </div>
+                );
+              })}
+              {activeRound.pastorVoteAllowed && adminUid && (
+                <div
+                  className={`px-3.5 py-2.5 rounded-xl border flex items-center justify-between gap-2 text-xs ${
+                    receiptIds.includes(`pastor_${adminUid}`)
+                      ? 'bg-emerald-50 border-emerald-200 text-emerald-950'
+                      : 'bg-slate-50 border-slate-200 text-slate-700'
+                  }`}
+                >
+                  <span className="font-semibold truncate">Pastor / Administrador</span>
+                  <span
+                    className={`font-bold shrink-0 ${
+                      receiptIds.includes(`pastor_${adminUid}`)
+                        ? 'text-emerald-800'
+                        : 'text-slate-500'
+                    }`}
+                  >
+                    {receiptIds.includes(`pastor_${adminUid}`) ? 'Voto recibido ✓' : 'Pendiente'}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Pastor Observation Banner (Visible to all members) */}
       {activeRound.observation && activeRound.observation.trim() && (
@@ -1384,10 +1778,15 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
           <div className="p-5 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center gap-3 text-emerald-950">
             <CheckCircle2 className="w-6 h-6 text-emerald-700 shrink-0" />
             <div>
-              <p className="font-bold text-base">Tu voto secreto ha sido registrado</p>
+              <p className="font-bold text-base">
+                {isTestRound
+                  ? '¡Voto de prueba recibido correctamente!'
+                  : 'Tu voto secreto ha sido registrado'}
+              </p>
               <p className="text-xs text-emerald-800 mt-0.5">
-                Nadie puede ver tu elección y tu enlace quedó bloqueado para evitar votos
-                duplicados en este cargo.
+                {isTestRound
+                  ? 'Tu enlace y dispositivo funcionan correctamente. Este ensayo no afecta los nombramientos reales.'
+                  : 'Nadie puede ver tu elección y tu enlace quedó bloqueado para evitar votos duplicados en este cargo.'}
               </p>
             </div>
           </div>
@@ -1801,6 +2200,8 @@ export const VoteSection: React.FC<VoteSectionProps> = ({
         </div>
       )}
       {proposalLimitModal}
+      {testConfirmModal}
+      {restartFormalModal}
     </div>
   );
 };

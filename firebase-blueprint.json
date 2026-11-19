@@ -294,6 +294,9 @@
         "isTieBreaker": {
           "type": "boolean"
         },
+        "isTestRound": {
+          "type": "boolean"
+        },
         "roundNumber": {
           "type": "integer"
         },
@@ -529,6 +532,9 @@
           "type": "integer"
         },
         "isTieBreaker": {
+          "type": "boolean"
+        },
+        "isTestRound": {
           "type": "boolean"
         },
         "sessionStatus": {

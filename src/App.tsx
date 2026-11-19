@@ -97,6 +97,7 @@ export default function App() {
   const [activeObservations, setActiveObservations] = useState<RoundObservation[]>([]);
   const [ballots, setBallots] = useState<SecretBallot[]>([]);
   const [receiptsCount, setReceiptsCount] = useState(0);
+  const [receiptIds, setReceiptIds] = useState<string[]>([]);
   const [hasVotedCurrentRound, setHasVotedCurrentRound] = useState(false);
 
   const [showExitModal, setShowExitModal] = useState(false);
@@ -366,6 +367,7 @@ export default function App() {
     if (!effectiveSessionId || !activeRound || !isAdmin) {
       setBallots([]);
       setReceiptsCount(0);
+      setReceiptIds([]);
       return;
     }
 
@@ -383,6 +385,7 @@ export default function App() {
       collection(db, 'sessions', effectiveSessionId, 'rounds', activeRound.id, 'receipts'),
       (snap) => {
         setReceiptsCount(snap.size);
+        setReceiptIds(snap.docs.map((d) => d.id));
       },
       (err) => handleFirestoreError(err, OperationType.LIST, receiptsPath)
     );
@@ -410,6 +413,7 @@ export default function App() {
 
     const signature = [
       activeRound.id,
+      activeRound.isTestRound ? '1' : '0',
       session.sessionStatus ?? 'active',
       activeRound.status,
       activeRound.proposalsOpen ? '1' : '0',
@@ -699,13 +703,16 @@ export default function App() {
             isAdmin={isAdmin}
             adminUid={user?.uid ?? null}
             committeeMember={committeeMember}
+            committee={committee}
             departments={departments}
             activeRound={activeRound}
+            allRounds={rounds}
             candidates={activeCandidates}
             observations={activeObservations}
             eligibleMembers={eligibleMembers}
             hasVotedCurrentRound={hasVotedCurrentRound}
             receiptsCount={receiptsCount}
+            receiptIds={receiptIds}
             ballots={ballots}
             onGoToResults={() => setActiveSection('results')}
           />

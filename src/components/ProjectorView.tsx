@@ -168,6 +168,14 @@ export const ProjectorView: React.FC<ProjectorViewProps> = ({ sessionId, project
                     </span>
                   </>
                 )}
+                {state.isTestRound && (
+                  <>
+                    <span aria-hidden="true">·</span>
+                    <span className="font-bold text-amber-300">
+                      VOTACIÓN DE PRUEBA (SIN VALIDEZ OFICIAL)
+                    </span>
+                  </>
+                )}
                 {state.isTieBreaker && (
                   <>
                     <span aria-hidden="true">·</span>
@@ -188,10 +196,16 @@ export const ProjectorView: React.FC<ProjectorViewProps> = ({ sessionId, project
                       VOTACIÓN FINALIZADA
                     </div>
                   )}
-                  {state.roundStatus === 'tie' && (
+                  {state.roundStatus === 'tie' && !state.isTestRound && (
                     <div className="inline-flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-amber-500/20 border border-amber-400/40 text-amber-200 font-bold text-lg">
                       <AlertTriangle className="w-6 h-6" />
                       EMPATE DETECTADO
+                    </div>
+                  )}
+                  {state.roundStatus === 'tie' && state.isTestRound && (
+                    <div className="inline-flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-emerald-500/20 border border-emerald-400/40 text-emerald-200 font-bold text-lg">
+                      <CheckCircle2 className="w-6 h-6" />
+                      PRUEBA FINALIZADA
                     </div>
                   )}
                   {state.roundStatus === 'open' && (

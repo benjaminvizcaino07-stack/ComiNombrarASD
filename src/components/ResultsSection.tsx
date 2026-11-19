@@ -21,6 +21,7 @@ import {
   X,
 } from 'lucide-react';
 import {
+  isTestPracticeRound,
   reopenRound,
   setRoundPauseState,
   startRoundForDepartment,
@@ -155,8 +156,11 @@ export const ResultsSection: React.FC<ResultsSectionProps> = ({
     )
   );
 
+  const isTestRound = isTestPracticeRound(activeRound);
+
   const hasTie = Boolean(
     activeRound &&
+      !isTestRound &&
       activeRound.status === 'closed' &&
       activeRound.tiedCandidateIds.length > 0
   );
@@ -377,6 +381,14 @@ export const ResultsSection: React.FC<ResultsSectionProps> = ({
             </div>
           </div>
 
+          {isTestRound && (
+            <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-xs sm:text-sm text-amber-950">
+              <strong>Votación de prueba (ensayo técnico):</strong> Esta ronda sirve únicamente para
+              verificar que todos los votantes y enlaces funcionen correctamente. No afecta ningún
+              departamento ni la lista oficial.
+            </div>
+          )}
+
           {isGroupedRound &&
             activeRound.status === 'closed' &&
             canMemberSeeResults &&
@@ -462,9 +474,11 @@ export const ResultsSection: React.FC<ResultsSectionProps> = ({
                   : cand.voteCount;
                 const widthPct = Math.round((votes / maxVotes) * 100);
                 const isElected =
+                  !isTestRound &&
                   activeRound.status === 'closed' &&
                   activeRound.electedCandidateIds.includes(cand.id);
                 const isTied =
+                  !isTestRound &&
                   activeRound.status === 'closed' &&
                   activeRound.tiedCandidateIds.includes(cand.id);
                 let electedBadgeText = '· Elegido(a)';

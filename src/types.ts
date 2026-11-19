@@ -87,6 +87,7 @@ export interface RoundData {
   seats: number;
   maxProposals?: number | null;
   isTieBreaker: boolean;
+  isTestRound?: boolean;
   roundNumber: number;
   status: RoundStatus;
   proposalsOpen?: boolean;
@@ -168,6 +169,7 @@ export interface ProjectorState {
   seats?: number;
   maxProposals?: number | null;
   isTieBreaker?: boolean;
+  isTestRound?: boolean;
   sessionStatus?: SessionStatus;
   roundStatus: 'idle' | 'open' | 'paused' | 'closed' | 'tie';
   proposalsOpen?: boolean;
