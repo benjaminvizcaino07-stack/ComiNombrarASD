@@ -4,6 +4,7 @@ import {
   BookOpen,
   Check,
   Copy,
+  Download,
   Eye,
   EyeOff,
   FileSpreadsheet,
@@ -62,7 +63,9 @@ import {
   SessionData,
 } from '../types';
 import {
+  downloadMembersExcelTemplate,
   ParsedMemberRow,
+  parseBulkPastedMembers,
   parseMembersExcel,
   parseMembersPdf,
 } from '../utils/exportReports';
@@ -225,6 +228,8 @@ export const AdminSection: React.FC<AdminSectionProps> = ({
     });
     return map;
   }, [departments]);
+
+  const parsedBulkRows = useMemo(() => parseBulkPastedMembers(bulkText), [bulkText]);
 
   const flashNotice = (msg: string) => {
     setStatusNotice(msg);
@@ -888,19 +893,23 @@ export const AdminSection: React.FC<AdminSectionProps> = ({
   };
 
   const handleBulkAddMembers = async () => {
-    const lines = bulkText
-      .split(/\r?\n/)
-      .map((l) => l.trim())
-      .filter((l) => l.length >= 2);
-    if (lines.length === 0) return;
+    const parsed = parseBulkPastedMembers(bulkText);
+    if (parsed.length === 0) {
+      flashNotice('No se detectaron nombres válidos en el texto pegado.');
+      return;
+    }
 
     setActionError(null);
     setBusyAction('bulk-members');
     try {
       const existingNames = new Set(eligibleMembers.map((m) => m.name.toLowerCase()));
-      const uniqueNew = Array.from(new Set(lines))
-        .filter((name) => !existingNames.has(name.toLowerCase()))
-        .map((name) => ({ name }));
+      const uniqueNew = parsed.filter((row) => !existingNames.has(row.name.toLowerCase()));
+      if (uniqueNew.length === 0) {
+        setShowBulkModal(false);
+        setBulkText('');
+        flashNotice('Todos los nombres pegados ya estaban registrados.');
+        return;
+      }
 
       const added = await batchAddEligibleMembers(session.id, uniqueNew);
       setBulkText('');
@@ -1951,6 +1960,14 @@ export const AdminSection: React.FC<AdminSectionProps> = ({
                 />
                 <button
                   type="button"
+                  onClick={() => downloadMembersExcelTemplate(session.churchName)}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-emerald-300 bg-emerald-50 text-emerald-900 text-sm font-semibold hover:bg-emerald-100 transition-colors cursor-pointer min-h-[44px]"
+                >
+                  <Download className="w-4 h-4" />
+                  Descargar plantilla Excel
+                </button>
+                <button
+                  type="button"
                   onClick={() => fileInputRef.current?.click()}
                   disabled={busyAction === 'excel' || busyAction === 'pdf'}
                   className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-700 text-white text-sm font-semibold hover:bg-emerald-800 transition-colors cursor-pointer min-h-[44px] disabled:opacity-60"
@@ -2452,31 +2469,57 @@ export const AdminSection: React.FC<AdminSectionProps> = ({
               </button>
             </div>
             <p className="text-sm text-slate-600">
-              Escribe o pega un nombre por línea. El sistema evitará duplicados automáticamente.
+              Pega un nombre por línea o copia y pega directamente desde la{' '}
+              <strong>plantilla de Excel</strong> (1 columna de <em>Nombre completo</em> o 2
+              columnas con <em>Teléfono</em> opcional). El sistema omitirá encabezados, ejemplos y
+              duplicados automáticamente.
             </p>
             <textarea
               rows={8}
               value={bulkText}
               onChange={(e) => setBulkText(e.target.value)}
-              placeholder={'Carlos Méndez\nAna Lucía Torres\nRoberto Gómez'}
+              placeholder={
+                'Carlos Méndez\t809-555-0123\nAna Lucía Torres\nRoberto Gómez\t829-555-0456'
+              }
               className="w-full p-3.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-700"
             />
-            <div className="flex justify-end gap-3">
+            {bulkText.trim() && (
+              <p className="text-xs font-medium text-blue-900 bg-blue-50 border border-blue-200 rounded-xl px-3.5 py-2 tabular-nums">
+                {parsedBulkRows.length > 0
+                  ? `Se detectaron ${parsedBulkRows.length} ${
+                      parsedBulkRows.length === 1 ? 'miembro válido' : 'miembros válidos'
+                    } para importar.`
+                  : 'No se detectaron nombres válidos en el texto pegado.'}
+              </p>
+            )}
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
               <button
                 type="button"
-                onClick={() => setShowBulkModal(false)}
-                className="px-4 py-2.5 rounded-xl border border-slate-300 text-sm font-semibold text-slate-700 cursor-pointer"
+                onClick={() => downloadMembersExcelTemplate(session.churchName)}
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-800 hover:underline cursor-pointer"
               >
-                Cancelar
+                <Download className="w-3.5 h-3.5" />
+                Descargar plantilla Excel
               </button>
-              <button
-                type="button"
-                disabled={busyAction === 'bulk-members'}
-                onClick={handleBulkAddMembers}
-                className="px-5 py-2.5 rounded-xl bg-blue-800 text-white text-sm font-semibold hover:bg-blue-900 cursor-pointer"
-              >
-                Importar nombres
-              </button>
+              <div className="flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowBulkModal(false)}
+                  className="px-4 py-2.5 rounded-xl border border-slate-300 text-sm font-semibold text-slate-700 cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  disabled={busyAction === 'bulk-members' || parsedBulkRows.length === 0}
+                  onClick={handleBulkAddMembers}
+                  className="px-5 py-2.5 rounded-xl bg-blue-800 text-white text-sm font-semibold hover:bg-blue-900 cursor-pointer disabled:opacity-50"
+                >
+                  {busyAction === 'bulk-members'
+                    ? 'Importando...'
+                    : `Importar ${parsedBulkRows.length > 0 ? parsedBulkRows.length : 'nombres'}`}
+                </button>
+              </div>
             </div>
           </div>
         </div>

@@ -8,6 +8,19 @@ export interface ParsedMemberRow {
   notes?: string;
 }
 
+const TEMPLATE_HEADER_PATTERN =
+  /^(?:nombre(?:\s+completo)?|nombres?(?:\s+y\s+apellidos?)?|apellidos?\s+y\s+nombres?|miembro|integrante|feligr[eé]s|persona|candidato|#)$/i;
+
+const TEMPLATE_EXAMPLE_PATTERN = /^ejemplo\s*:/i;
+
+function isTemplateNoiseName(name: string): boolean {
+  const clean = name.trim();
+  if (!clean || clean.length < 2) return true;
+  if (TEMPLATE_HEADER_PATTERN.test(clean)) return true;
+  if (TEMPLATE_EXAMPLE_PATTERN.test(clean)) return true;
+  return false;
+}
+
 export async function parseMembersExcel(file: File): Promise<ParsedMemberRow[]> {
   const buffer = await file.arrayBuffer();
   const workbook = XLSX.read(buffer, { type: 'array' });
@@ -33,19 +46,113 @@ export async function parseMembersExcel(file: File): Promise<ParsedMemberRow[]> 
 
   for (const row of rows) {
     const rawName = String(row[nameKey] ?? '').trim().replace(/\s+/g, ' ');
-    if (!rawName || rawName.length < 2) continue;
+    if (isTemplateNoiseName(rawName)) continue;
     const normalized = rawName.toLowerCase();
     if (seen.has(normalized)) continue;
     seen.add(normalized);
 
-    const rawNotes = notesKey ? String(row[notesKey] ?? '').trim().slice(0, 240) : '';
+    const rawNotes = notesKey
+      ? String(row[notesKey] ?? '').trim().replace(/\s+/g, ' ').slice(0, 240)
+      : '';
+    const cleanNotes =
+      rawNotes && !TEMPLATE_EXAMPLE_PATTERN.test(rawNotes) ? rawNotes : undefined;
     parsed.push({
       name: rawName.slice(0, 140),
-      notes: rawNotes || undefined,
+      notes: cleanNotes,
     });
   }
 
   return parsed;
+}
+
+export function parseBulkPastedMembers(rawText: string): ParsedMemberRow[] {
+  const lines = rawText.split(/\r?\n/);
+  const seen = new Set<string>();
+  const parsed: ParsedMemberRow[] = [];
+
+  for (const rawLine of lines) {
+    if (!rawLine.trim()) continue;
+    const rawCells = rawLine.split('\t').map((c) => c.trim().replace(/\s+/g, ' '));
+    // Drop leading empty cells if selection started before name column
+    while (rawCells.length > 0 && !rawCells[0]) {
+      rawCells.shift();
+    }
+    if (rawCells.length === 0) continue;
+
+    // If first column is an ordinal index (e.g. "1" or "1.") and next column is the name
+    if (
+      rawCells.length >= 2 &&
+      /^(?:#|n°|no\.?)?\s*\d{1,4}\.?$/i.test(rawCells[0]) &&
+      /\p{L}/u.test(rawCells[1])
+    ) {
+      rawCells.shift();
+    }
+
+    const { text: cleanedName } = stripListPrefix(rawCells[0] ?? '');
+    if (isTemplateNoiseName(cleanedName)) continue;
+
+    const normalized = cleanedName.toLowerCase();
+    if (seen.has(normalized)) continue;
+    seen.add(normalized);
+
+    const rawNote = rawCells.slice(1).filter(Boolean).join(' · ').slice(0, 240);
+    const cleanNote =
+      rawNote &&
+      !/^(?:observaciones?|notas?|observaciones?\s*\(opcional\)|tel[eé]fono(?:\s*\(opcional\))?|celular(?:\s*\(opcional\))?)$/i.test(
+        rawNote
+      ) &&
+      !TEMPLATE_EXAMPLE_PATTERN.test(rawNote)
+        ? rawNote
+        : undefined;
+
+    parsed.push({
+      name: cleanedName.slice(0, 140),
+      notes: cleanNote,
+    });
+  }
+
+  return parsed;
+}
+
+export function downloadMembersExcelTemplate(churchName?: string): void {
+  const membersRows: string[][] = [
+    ['Nombre completo', 'Teléfono (opcional)'],
+    ['Ejemplo: Juan Carlos Pérez', 'Ejemplo: 809-555-0123'],
+    ['Ejemplo: Ana Lucía Torres', ''],
+  ];
+
+  const guideRows: string[][] = [
+    ['PLANTILLA DE MIEMBROS APTOS - NOMBRAMIENTOS SDA'],
+    [''],
+    ['Cómo usar esta plantilla en el sistema:'],
+    ['1. Llena la hoja "Miembros Aptos" colocando un miembro por fila en la columna "Nombre completo".'],
+    ['2. La columna "Teléfono (opcional)" es opcional; puedes dejarla vacía si no deseas incluir teléfono.'],
+    [''],
+    ['Para usar en "Pegar lista múltiple":'],
+    ['- Selecciona los nombres en Excel (1 columna o ambas columnas Nombre completo + Teléfono).'],
+    ['- Copia las celdas (Ctrl+C), abre "Pegar lista múltiple" en la aplicación y pega (Ctrl+V).'],
+    [''],
+    ['Para subir el archivo directamente:'],
+    ['- Guarda este archivo (.xlsx) y súbelo con el botón "Cargar Excel / CSV".'],
+    [''],
+    ['Nota: Los encabezados y las filas de ejemplo ("Ejemplo: ...") se omiten automáticamente.'],
+  ];
+
+  const wb = XLSX.utils.book_new();
+  const wsMembers = XLSX.utils.aoa_to_sheet(membersRows);
+  const wsGuide = XLSX.utils.aoa_to_sheet(guideRows);
+
+  wsMembers['!cols'] = [{ wch: 40 }, { wch: 28 }];
+  wsGuide['!cols'] = [{ wch: 92 }];
+
+  XLSX.utils.book_append_sheet(wb, wsMembers, 'Miembros Aptos');
+  XLSX.utils.book_append_sheet(wb, wsGuide, 'Instrucciones');
+
+  const safeChurch = (churchName ?? 'Iglesia_SDA')
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  XLSX.writeFile(wb, `Plantilla_Miembros_Aptos_${safeChurch || 'SDA'}.xlsx`);
 }
 
 const PDF_HEADER_OR_NOISE_PATTERNS: RegExp[] = [
